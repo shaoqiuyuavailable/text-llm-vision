@@ -6,6 +6,8 @@
 
 参考了 [glm-vision](https://github.com/shiss3/glm-vision) 的「MCP + 代理 + 软规则」三层互补架构，视觉后端落在本地 Ollama + Qwen2.5-VL。
 
+> **English / Keywords**: A **local vision proxy** for text-only LLMs (DeepSeek, GLM). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), and **CLAUDE.md soft rules**. Vision backend: **Ollama + Qwen2.5-VL** with a **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, deep **Claude Code** integration (vision level toggling, status bar, auto-start). Similar projects: glm-vision, ds-vision-skill-plus.
+
 ## 四大差异化卖点
 
 | 卖点 | 说明 |
