@@ -1,11 +1,35 @@
-import subprocess, sys, os
+import subprocess, sys, os, json
 
 # 档位定义：0=off 1=fast 2=standard 3=deep
 # on/off 向后兼容：on→1(fast), off→0
 STATE = os.path.expanduser("~/.claude/vision-eyes/state")
+CONFIG = os.path.expanduser("~/.claude/vision-eyes/config.json")
 NAMES = {0: "OFF", 1: "fast", 2: "standard", 3: "deep"}
 # off 时主动卸载的模型（从 config 读或默认 qwen2.5vl）
 VISION_MODEL = "qwen2.5vl"
+
+
+def set_port(port: int) -> int:
+    """切换代理监听端口：写 config.json 的 port 字段。
+    提示：端口变化需同步 CC Switch 里 DeepSeek 的 Base URL 到 http://localhost:<port>。"""
+    port = int(port)
+    if not (1 <= port <= 65535):
+        print(f"invalid port: {port}")
+        return 1
+    cfg = {}
+    if os.path.exists(CONFIG):
+        try:
+            with open(CONFIG, encoding="utf-8") as f:
+                cfg = json.load(f)
+        except (ValueError, OSError):
+            cfg = {}
+    cfg["port"] = port
+    with open(CONFIG, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    print(f"port set to {port} (config.json)")
+    print(f"REMEMBER: update CC Switch base URL -> http://localhost:{port}")
+    print(f"          then restart session (SessionStart restarts proxy on new port)")
+    return 0
 
 
 def parse(arg: str) -> int:
@@ -32,7 +56,14 @@ def _unload_model():
 
 
 def main():
-    val = parse(sys.argv[1] if len(sys.argv) > 1 else "1")
+    args = sys.argv[1:]
+    # 子命令：port <N> 切换端口（写 config.json）
+    if args and args[0].lower() in ("port", "-p"):
+        if len(args) < 2:
+            print("usage: vision port <1-65535>")
+            return 1
+        return set_port(args[1])
+    val = parse(args[0] if args else "1")
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
     open(STATE, "w").write(str(val))
     print(f"vision {NAMES[val]} ({val})")

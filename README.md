@@ -293,6 +293,7 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 11. **依赖缺失兜底（#5）**：`start-proxy.bat` 启动前预检 `python` + `uvicorn/fastapi/httpx`，失败给出明确提示；启动后用 `/health` 验活（而非只看端口），端口占用但无响应时告警。state/config 回退（#15/#16）不再静默——损坏时记 warning 落日志。
 12. **假死探测（#2）**：事件循环卡死时 HTTP 层不响应但端口仍监听（`/health` 测不出）。代理内置 **watchdog 守护线程**：每 30s 请求自身 `/health`，连续 3 次失败判假死 → 记 ERROR + `os._exit(1)` 自杀，下次 SessionStart 的 start-proxy.bat 自动拉起新进程。仅在 uvicorn 运行时启用（lifespan 启动），import/测试不触发。
 13. **上游断流日志（#10）**：SSE 流式转发中上游中途断流（ReadError/ConnectError）时，`_iter_upstream` 包装生成器记 `WARNING upstream stream interrupted mid-way` + 请求 ID。正常完成 / 客户端主动断开不记录（不算异常）。
+14. **端口可配置（#4）**：代理端口由 `config.json` 的 `port` 字段决定（默认 8787）。切换命令：`vision port <N>`（或 `python toggle.py port <N>`），会写 config.json 并**提示同步三处**：CC Switch 里 DeepSeek 的 Base URL、MCP 注册的 `VISION_IDENTIFY_URL`、settings.json 的 `ANTHROPIC_BASE_URL`。改端口后需重启会话（SessionStart 会在新端口自动拉起代理）。
 
 ## 文件清单
 
@@ -308,9 +309,11 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `scan_one.py` | 单图 scan JSON 输出 |
 | `collect_images.py` | Wikimedia 类别语料采集 |
 | `mcp-vision.js` | MCP server：describe_image 工具 |
-| `toggle.py` | 视觉档位开关（写 state 0/1/2/3） |
-| `start-proxy.bat` / `status.bat` | 启动代理 / 状态栏（显示档位）|
-| `test_proxy.py` | 代理端到端测试 |
+| `toggle.py` | 视觉档位开关（写 state 0/1/2/3）+ `port` 子命令切换端口 |
+| `start-proxy.bat` / `start_proxy.py` | 启动代理（bat 薄壳，逻辑全在 Python：读端口/验活/拉起）|
+| `read_port.py` | 输出配置端口（供 bat/脚本用） |
+| `status.bat` | 状态栏（显示档位）|
+| `test_proxy.py` | 代理端到端测试（读配置端口） |
 
 ## 附：CLAUDE.md 看图规范
 
