@@ -291,6 +291,8 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 9. **图片大小限制**：单图超过 10MB 不识别，替换占位符 `[图片N（超过10MB，未识别）]` 并记 warning，防内存/耗时失控。非 image 块（`document` 等）原样透传但记 warning。
 10. **识别超时兜底（#13）**：Ollama 僵死/极慢时，识别可能无限挂起（`asyncio.to_thread` 无超时）。现已用 `asyncio.wait_for` 加**总超时**（按档位 fast 45s / standard 60s / deep 120s），超时后**所有图片替换为占位符**（`[图片（识别超时，已省略）]`）并继续转发——请求不死、纯文本模型不收到 image 块，但该次识别结果丢失。
 11. **依赖缺失兜底（#5）**：`start-proxy.bat` 启动前预检 `python` + `uvicorn/fastapi/httpx`，失败给出明确提示；启动后用 `/health` 验活（而非只看端口），端口占用但无响应时告警。state/config 回退（#15/#16）不再静默——损坏时记 warning 落日志。
+12. **假死探测（#2）**：事件循环卡死时 HTTP 层不响应但端口仍监听（`/health` 测不出）。代理内置 **watchdog 守护线程**：每 30s 请求自身 `/health`，连续 3 次失败判假死 → 记 ERROR + `os._exit(1)` 自杀，下次 SessionStart 的 start-proxy.bat 自动拉起新进程。仅在 uvicorn 运行时启用（lifespan 启动），import/测试不触发。
+13. **上游断流日志（#10）**：SSE 流式转发中上游中途断流（ReadError/ConnectError）时，`_iter_upstream` 包装生成器记 `WARNING upstream stream interrupted mid-way` + 请求 ID。正常完成 / 客户端主动断开不记录（不算异常）。
 
 ## 文件清单
 
