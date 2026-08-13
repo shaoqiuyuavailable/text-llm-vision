@@ -31,6 +31,9 @@ log = logging.getLogger("vision_proxy")  # 与 proxy.py 同 logger，写同一�
 def _defaults() -> dict:
     return {
         "port": DEFAULT_PORT,  # 代理监听端口（config.json 可覆盖）
+        # 上游默认地址（纯文本模型真实端点）。代理按请求头 token 反查 CC Switch
+        # provider 真实上游；查不到时回退此处。解绑 DeepSeek 写死，可配任意上游。
+        "upstream": "https://api.deepseek.com/anthropic",
         "ollama": {
             "url": _prompts.OLLAMA,
             "model": _prompts.VISION_MODEL,
@@ -74,6 +77,8 @@ def get() -> dict:
         if isinstance(data, dict):
             if "port" in data:
                 cfg["port"] = data["port"]
+            if "upstream" in data:
+                cfg["upstream"] = data["upstream"]
             if isinstance(data.get("cloud"), dict):
                 cfg["cloud"].update(data["cloud"])
             if isinstance(data.get("ollama"), dict):
