@@ -60,24 +60,63 @@ def _entry(prompt_key: str) -> dict:
     return {"text": entry.get("text", ""), "temperature": temp}
 
 
+def _cloud_key() -> str:
+    """云端 API key：优先环境变量 DASHSCOPE_API_KEY，回退 config.cloud.api_key。
+    key 属敏感信息，走环境变量避免提交仓库。"""
+    return os.environ.get("DASHSCOPE_API_KEY") or config_loader.get().get("cloud", {}).get("api_key", "")
+
+
+def _post_cloud(b64: str, prompt: str, temperature: float) -> str:
+    """云端通道：OpenAI 兼容 /chat/completions，图片以 data URI 传。"""
+    c = config_loader.get().get("cloud", {})
+    base = (c.get("base_url") or "").rstrip("/")
+    url = f"{base}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {_cloud_key()}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": c.get("model") or "qwen-vl-plus",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+            ],
+        }],
+        "temperature": temperature,
+        "max_tokens": 2000,
+    }
+    r = httpx.post(url, json=payload, headers=headers, timeout=120, trust_env=False)
+    r.raise_for_status()
+    data = r.json()
+    return data["choices"][0]["message"]["content"].strip()
+
+
 def _post_b64(b64: str, prompt: str, temperature: float) -> str:
     cfg = config_loader.get()
     o = cfg["ollama"]
+    cloud = cfg.get("cloud", {})
+    use_cloud = bool(_cloud_key())  # 环境变量或 config 配了 key 走云端，否则纯本地
     # 缓存只在 deep 档(3)启用：fast/standard 收益趋近于零，deep 多次调用才值得。
     use_cache = _cache_on()
+    model = cloud.get("model") if use_cloud else o["model"]  # key 区分本地/云端
     if use_cache:
         # 缓存 key 含 model + temperature：换模型/改温度后不命中旧缓存（防拿过期结果）
-        key = hashlib.sha256((o["model"] + "|" + b64 + "|" + prompt + "|" + str(temperature)).encode()).hexdigest()
+        key = hashlib.sha256((model + "|" + b64 + "|" + prompt + "|" + str(temperature)).encode()).hexdigest()
         with _cache_lock:
             if key in _cache:
                 return _cache[key]
-    with _OLLAMA_SEM:  # 并发上限 2，防本地单卡雪崩
-        r = httpx.post(o["url"], json={"model": o["model"], "prompt": prompt, "images": [b64],
-                                       "stream": False, "options": {"temperature": temperature,
-                                                                    "top_p": o["top_p"]}},
-                       timeout=120, trust_env=False)
-    r.raise_for_status()
-    text = r.json()["response"].strip()
+    if use_cloud:
+        text = _post_cloud(b64, prompt, temperature)
+    else:
+        with _OLLAMA_SEM:  # 并发上限 2，防本地单卡雪崩
+            r = httpx.post(o["url"], json={"model": o["model"], "prompt": prompt, "images": [b64],
+                                           "stream": False, "options": {"temperature": temperature,
+                                                                        "top_p": o["top_p"]}},
+                           timeout=120, trust_env=False)
+        r.raise_for_status()
+        text = r.json()["response"].strip()
     if use_cache:
         with _cache_lock:
             _cache[key] = text
