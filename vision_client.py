@@ -60,19 +60,54 @@ def _entry(prompt_key: str) -> dict:
     return {"text": entry.get("text", ""), "temperature": temp}
 
 
+def _clouds() -> list:
+    """所有已配置的云端平台（config.cloud.clouds）。"""
+    return config_loader.get().get("cloud", {}).get("clouds", []) or []
+
+
+def _active_cloud() -> dict | None:
+    """按 cloud.active 选当前平台；未指定 active 时取第一个有 key 的。"""
+    cloud_cfg = config_loader.get().get("cloud", {})
+    active = cloud_cfg.get("active", "")
+    clouds = _clouds()
+    if not clouds:
+        return None
+    if active:
+        for c in clouds:
+            if c.get("name") == active:
+                return c
+        return None  # active 指定的平台不存在
+    # 未指定 active：取第一个配了 key 的（key 从环境变量或 config 读）
+    for c in clouds:
+        if _cloud_key_of(c):
+            return c
+    return None
+
+
+def _cloud_key_of(c: dict) -> str:
+    """单个平台的 key：优先环境变量（name 大写 + _API_KEY），回退 config 的 api_key。"""
+    name = (c.get("name") or "").strip().upper()
+    env = os.environ.get(f"{name}_API_KEY") if name else ""
+    if env:
+        return env
+    return c.get("api_key", "") or ""
+
+
 def _cloud_key() -> str:
-    """云端 API key：优先环境变量 DASHSCOPE_API_KEY，回退 config.cloud.api_key。
-    key 属敏感信息，走环境变量避免提交仓库。"""
-    return os.environ.get("DASHSCOPE_API_KEY") or config_loader.get().get("cloud", {}).get("api_key", "")
+    """当前激活平台的 API key（供 use_cloud 判断：任一平台有 key 即走云端）。"""
+    c = _active_cloud()
+    return _cloud_key_of(c) if c else ""
 
 
 def _post_cloud(b64: str, prompt: str, temperature: float) -> str:
-    """云端通道：OpenAI 兼容 /chat/completions，图片以 data URI 传。"""
-    c = config_loader.get().get("cloud", {})
+    """云端通道：按当前激活平台发 OpenAI 兼容 /chat/completions。"""
+    c = _active_cloud()
+    if not c:
+        raise RuntimeError("no active cloud platform configured")
     base = (c.get("base_url") or "").rstrip("/")
     url = f"{base}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {_cloud_key()}",
+        "Authorization": f"Bearer {_cloud_key_of(c)}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -96,11 +131,11 @@ def _post_cloud(b64: str, prompt: str, temperature: float) -> str:
 def _post_b64(b64: str, prompt: str, temperature: float) -> str:
     cfg = config_loader.get()
     o = cfg["ollama"]
-    cloud = cfg.get("cloud", {})
-    use_cloud = bool(_cloud_key())  # 环境变量或 config 配了 key 走云端，否则纯本地
+    use_cloud = bool(_cloud_key())  # 任一平台配了 key 走云端，否则纯本地
     # 缓存只在 deep 档(3)启用：fast/standard 收益趋近于零，deep 多次调用才值得。
     use_cache = _cache_on()
-    model = cloud.get("model") if use_cloud else o["model"]  # key 区分本地/云端
+    ac = _active_cloud()
+    model = (ac.get("model") if ac else "") or o["model"]  # key 区分本地/云端
     if use_cache:
         # 缓存 key 含 model + temperature：换模型/改温度后不命中旧缓存（防拿过期结果）
         key = hashlib.sha256((model + "|" + b64 + "|" + prompt + "|" + str(temperature)).encode()).hexdigest()

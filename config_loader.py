@@ -37,9 +37,13 @@ def _defaults() -> dict:
             "temperature": _prompts.TEMPERATURE,
             "top_p": _prompts.TOP_P,
         },
-        # 可选云端通道：配了 api_key 就走云端（OpenAI 兼容），否则纯本地 Ollama。
+        # 可选云端通道（多平台轮换）：clouds 数组 + cloud.active 选当前平台。
+        # 任一平台配了 key 就走云端（OpenAI 兼容），否则纯本地 Ollama。
         # 保留"默认零配置纯本地"的定位，云端是手动开关。
-        "cloud": {"base_url": "", "api_key": "", "model": ""},
+        "cloud": {
+            "active": "",
+            "clouds": [],
+        },
         "scenes": {k: dict(v) for k, v in getattr(_prompts, "SCENES", {}).items()},
         "prompts": {k: dict(v) for k, v in _prompts.PROMPTS.items()},
     }
