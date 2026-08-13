@@ -21,6 +21,9 @@ import config_loader
 _cache = {}
 MAX_CACHE = 100  # 缓存上限：防内存无限膨胀，超出清最旧（FIFO）
 _cache_lock = threading.Lock()  # 缓存读写锁：防并发重复请求 Ollama
+# Ollama 并发限制：本地单卡 8B 模型无法处理高并发，多个消息同时识别会雪崩
+# （请求排队堵死/显存溢出）。2 个并发足够防雪崩又允许 fast 档轻并发贴图。
+_OLLAMA_SEM = threading.BoundedSemaphore(2)
 
 STATE_FILE = os.path.expanduser("~/.claude/vision-eyes/state")
 
@@ -68,10 +71,11 @@ def _post_b64(b64: str, prompt: str, temperature: float) -> str:
         with _cache_lock:
             if key in _cache:
                 return _cache[key]
-    r = httpx.post(o["url"], json={"model": o["model"], "prompt": prompt, "images": [b64],
-                                   "stream": False, "options": {"temperature": temperature,
-                                                                "top_p": o["top_p"]}},
-                   timeout=120, trust_env=False)
+    with _OLLAMA_SEM:  # 并发上限 2，防本地单卡雪崩
+        r = httpx.post(o["url"], json={"model": o["model"], "prompt": prompt, "images": [b64],
+                                       "stream": False, "options": {"temperature": temperature,
+                                                                    "top_p": o["top_p"]}},
+                       timeout=120, trust_env=False)
     r.raise_for_status()
     text = r.json()["response"].strip()
     if use_cache:

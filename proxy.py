@@ -128,11 +128,14 @@ async def _iter_upstream(resp, rid: str):
 MAX_IMAGES_PER_REQ = 3      # 每请求最多真识别的图片数
 MAX_IMAGE_B64 = 10 * 1024 * 1024 * 4 // 3  # 10MB 二进制对应的 base64 长度上限（约 13.98MB 字符）
 
-# 上游转发重试：DeepSeek 网络偶发 ConnectError/ReadError/5xx（上游层问题，只重试不重试代码逻辑）。
-# 连接类错误和 5xx 重试 1 轮（共 2 次尝试）；4xx（业务错误）不重试。
+# 上游转发重试：DeepSeek 网络偶发连接错误 / 服务端明确失败才重试。
+# 连接类错误（ConnectError/ReadTimeout 等）保证没到服务端 → 可安全重试；
+# 500/502/503 服务端明确失败未扣费 → 可重试；
+# 504（网关超时）不重试——流式端点 504 可能已部分生成/处理，盲发会重复扣费+幻觉；
+# 4xx（业务错误）不重试。
 _RETRYABLE_ERR = (httpx.ConnectError, httpx.ReadError, httpx.ReadTimeout, httpx.ConnectTimeout,
                   httpx.RemoteProtocolError, httpx.WriteError)
-_RETRY_STATUS = {500, 502, 503, 504}
+_RETRY_STATUS = {500, 502, 503}
 
 
 async def _send_with_retry(client, req, rid, tag: str, retries: int = 1):
