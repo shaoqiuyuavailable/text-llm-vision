@@ -123,6 +123,18 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 **混合方案**：大类精调 + zoom 内「组合分支」兜底跨界（代码/表格/界面/地图/证件/表情包在任一 zoom 内都能被捕获）。
 
+### OCR 自动路由（纯文字场景）
+
+**场景**：`document.chat` / `document.code`（聊天记录、代码截图）这类**纯文字**图片，视觉模型"描述"不如"直接提取文字"准。
+
+**路由逻辑**（在 `analyze` 的 zoom 层，`scan` 判场景后触发）：
+1. `scan` 判定场景 → 若是 `document.chat/code`
+2. 调 **RapidOCR**（本地 ONNX，离线免费，支持中英文）提取文字
+3. **严格限定纯文字**：OCR 提取到 **≥20 字符**才算纯文字 → 用 OCR 结果替代视觉 zoom（标 `[OCR]`）
+4. 提取不足（含图/空白）→ **回退视觉 zoom**（标 `[视觉]`）
+
+**收益**：纯文字截图的文字提取比视觉模型**更准**（OCR 精确到字符），且**少跑一次视觉 zoom**（省 10-30s）。视觉模型仍做 scan（描述/场景）+ guess（推测）。需 `pip install rapidocr_onnxruntime`（首次加载模型约 1-2s，之后复用单例）。
+
 ### 视觉后端：默认本地，可选手动开云端
 
 识别后端**默认纯本地 Ollama（零配置零费用）**；也可**手动配云端通道**（OpenAI 兼容 API）换取识别质量上限，两条路径自动切换：
@@ -363,7 +375,7 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | 文件 | 作用 |
 |------|------|
 | `proxy.py` | 反向代理：image→text 转换 + 透传 + 整体日志 + /health 验活 |
-| `vision_client.py` | 视觉识别客户端：scan/zoom/guess 三次判定 |
+| `vision_client.py` | 视觉识别客户端：scan/zoom/guess 三次判定 + 云端通道 + OCR 自动路由 |
 | `config_loader.py` | 读 config.json，缺失回退 prompts.py |
 | `config.json` | 场景/提示词/温度配置（唯一来源） |
 | `prompts.py` | 内置默认提示词（回退） |
