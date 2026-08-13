@@ -430,7 +430,7 @@ async def messages(request: Request):
 
     t2 = time.time()
     upstream = resolve_upstream(request)  # 按 token 反查 CC Switch provider 上游（回退 config）
-    log.debug("req=%s upstream=%s", rid, upstream)
+    log.info("req=%s upstream=%s", rid, upstream)
     client = httpx.AsyncClient(timeout=60.0, trust_env=False)
     req = client.build_request("POST", f"{upstream}/v1/messages",
                                headers=fwd_headers(request), json=body)
@@ -506,7 +506,7 @@ async def passthrough(request: Request, path: str):
     rid = uuid.uuid4().hex[:8]
     t0 = time.time()
     upstream = resolve_upstream(request)  # 按 token 反查 CC Switch provider 上游（回退 config）
-    log.debug("req=%s passthrough upstream=%s", rid, upstream)
+    log.info("req=%s passthrough upstream=%s", rid, upstream)
     client = httpx.AsyncClient(timeout=60.0, trust_env=False)
     req = client.build_request(request.method, f"{upstream}/{path}",
                                headers=fwd_headers(request), content=await request.body())
