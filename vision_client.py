@@ -160,6 +160,53 @@ def _post_b64(b64: str, prompt: str, temperature: float) -> str:
     return text
 
 
+_RAPIDOCR = None  # 惰性加载：RapidOCR 单例（首次加载模型约 1-2s）
+
+
+def _get_ocr_engine():
+    """惰性初始化 RapidOCR（纯 Python ONNX，跨平台，支持中文）。首次调用加载模型。"""
+    global _RAPIDOCR
+    if _RAPIDOCR is None:
+        from rapidocr_onnxruntime import RapidOCR
+        _RAPIDOCR = RapidOCR()
+    return _RAPIDOCR
+
+
+def ocr(path_or_b64: str, prompt: str = "") -> str:
+    """RapidOCR 提取图片文字（本地 ONNX，离线免费，支持中英文）。
+
+    仅提取文字本身（不含视觉理解），适合纯文字截图（聊天/代码/表格/文档页）。
+    prompt 保留参数以兼容 describe 签名；OCR 不使用 prompt。
+    失败（未装 rapidocr / 非图片）返回空串——调用方回退视觉模型。
+    """
+    import base64 as _b64
+    import io as _io
+    try:
+        if os.path.exists(path_or_b64):
+            img_path = path_or_b64
+        else:
+            # base64 → 临时文件
+            from PIL import Image
+            img = Image.open(_io.BytesIO(_b64.b64decode(path_or_b64))).convert("RGB")
+            tmp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_ocr_tmp.png")
+            img.save(tmp, "PNG")
+            img_path = tmp
+        engine = _get_ocr_engine()
+        result, _ = engine(img_path)
+        if img_path != path_or_b64:
+            try:
+                os.remove(img_path)
+            except OSError:
+                pass
+        if not result:
+            return ""
+        # 按从上到下顺序拼接文字（每行用换行分隔）
+        lines = [item[1].strip() for item in result if item and item[1]]
+        return "\n".join(lines).strip()
+    except Exception:
+        return ""  # OCR 不可用 → 回退
+
+
 MAX_EDGE = 1280  # 缩放上限：图片最大边长超过此值则等比例缩到该值（省识别耗时/Tokens）
 
 
@@ -285,16 +332,28 @@ def analyze(path_or_b64: str, precision: str = "") -> str:
         return f"【初步判断】{desc}\n【场景】{scene}"
     # standard / deep：先 scan 判场景，再 zoom
     desc, scene, sub = scan(path_or_b64)
-    facts = zoom(path_or_b64, scene, sub=sub, scan_desc=desc)
+    # 自动路由：纯文字场景（document.chat/code）优先用 OCR 提取文字替代视觉 zoom。
+    # 严格限定：OCR 必须提取到足够文字（≥20字符）才用，否则回退视觉 zoom（防含图/空白误判）。
+    facts = None
+    ocr_used = False
+    if scene == "document" and sub in ("chat", "code"):
+        ocr_text = ocr(path_or_b64)
+        if len(ocr_text) >= 20:
+            facts = f"[OCR 提取的文字（自动路由，未走视觉模型）]\n{ocr_text}"
+            ocr_used = True
+    if facts is None:
+        facts = zoom(path_or_b64, scene, sub=sub, scan_desc=desc)
     if precision == "standard":
-        return f"【初步判断】{desc}\n【场景】{scene}\n【细节】\n{facts}"
+        tag = "[OCR]" if ocr_used else "[视觉]"
+        return f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}"
     # deep：再加 guess + 空间结构（grounding bbox）
     guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc)
     try:
         spatial_out = spatial(path_or_b64)
     except Exception:
         spatial_out = ""  # grounding 失败不影响主体
-    base = f"【初步判断】{desc}\n【场景】{scene}\n【细节】\n{facts}\n\n【推测】\n{guess_out}"
+    tag = "[OCR]" if ocr_used else "[视觉]"
+    base = f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}\n\n【推测】\n{guess_out}"
     if spatial_out:
         base += f"\n\n【空间结构】\n{spatial_out}"
     return base
