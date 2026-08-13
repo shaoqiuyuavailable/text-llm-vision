@@ -182,6 +182,26 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 | Node.js | ≥ 18 | MCP server |
 | Claude Code | 最新 | 主运行环境 |
 
+### 0. 一键部署（推荐，1 步完成）
+
+> 前置：装好 [Ollama](https://ollama.com)、Python ≥3.10、Node.js ≥18（见下「前置环境」）。
+
+```bash
+python install.py                 # 检测环境 + 自动配置（MCP/hook/CLAUDE.md/权限）+ 启动代理
+python install.py --auto          # 首次部署推荐：额外自动 pip 装依赖 + ollama pull 视觉模型
+python install.py --check         # 只体检不执行，输出 ✓/✗ 清单（等价 `vision doctor`）
+python install.py --point-proxy   # 最后一步：BASE_URL 指向代理（自动备份，可回退）
+python install.py --rollback      # 回退 BASE_URL（从 state/ 备份恢复）
+```
+
+**`install.py` 幂等**：重复运行安全，已配置项自动跳过，不覆盖你现有的 `config.json`。它把下面 1-9 步压缩成一次运行——检测 Python/Node/Ollama/模型 → 部署代码 → 注册 MCP → 写 SessionStart hook → 追加 CLAUDE.md 引导 → 建 `/vision` 命令 → 启动代理并验活。
+
+**排错**：`vision doctor`（或 `install.py --check`）逐项体检四处配置，每项 ✗ 都附带修复命令。
+
+> **⚠️ 关于最后一步（`--point-proxy`）**：它把 `ANTHROPIC_BASE_URL` 指向代理——这是唯一有断连风险的改动（改前自动备份到 `state/settings.json.bak.vision`，可 `--rollback` 恢复）。建议先 `install.py --check` 确认全 ✓ 再执行，改后**重启 Claude Code** 生效。已有视觉的模型不必走这一步（见下方第 5 步说明）。
+
+### 手动部署（可选：了解各环节细节，正常用上面一键部署）
+
 ### 1. 安装 Ollama 并拉取视觉模型
 
 **Windows（winget）**：
@@ -314,6 +334,12 @@ claude mcp add --scope user vision -e VISION_IDENTIFY_URL=http://127.0.0.1:8787 
 ## 命令行工具
 
 ```
+python install.py                    # 一键部署（检测+自动配置+启动代理）
+python install.py --check            # 只体检（✓/✗ 清单）
+python install.py --auto             # 自动装依赖 + ollama pull 模型
+python install.py --point-proxy      # 最后一步：BASE_URL 指向代理（备份）
+python install.py --rollback         # 回退 BASE_URL
+
 python identify.py <图片路径>            # 三次判定全流程
 python identify.py <路径> --precision fast|standard|deep  # 指定精度（默认 deep，含空间结构）
 python identify.py <路径> --type person.anime  # 手动指定大类.小类
@@ -388,7 +414,8 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `scan_one.py` | 单图 scan JSON 输出 |
 | `collect_images.py` | Wikimedia 类别语料采集 |
 | `mcp-vision.js` | MCP server：describe_image 工具 |
-| `toggle.py` | 视觉控制：档位 0/1/2/3 + 后端 local[端口]/cloud[厂商]/list |
+| `toggle.py` | 视觉控制：档位 0/1/2/3 + 后端 local[端口]/cloud[厂商]/list/doctor |
+| `install.py` | 一键部署：环境检测 + 自动配置（MCP/hook/CLAUDE.md/权限）+ 启动代理 + BASE_URL 备份回退 |
 | `start-proxy.bat` / `start_proxy.py` | 启动代理（bat 薄壳，逻辑全在 Python：读端口/验活/拉起）|
 | `read_port.py` | 输出配置端口（供 bat/脚本用） |
 | `status.bat` | 状态栏（显示档位）|
