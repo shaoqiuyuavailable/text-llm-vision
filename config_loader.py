@@ -18,11 +18,13 @@
     "scan": {"text": "...", "temperature": 0.3}  → 温度用条目自带
 """
 import json
+import logging
 import os
 
 import prompts as _prompts
 
 CONFIG_PATH = os.path.expanduser("~/.claude/vision-eyes/config.json")
+log = logging.getLogger("vision_proxy")  # 与 proxy.py 同 logger，写同一日志文件
 
 
 def _defaults() -> dict:
@@ -65,6 +67,8 @@ def get() -> dict:
             if isinstance(data.get("prompts"), dict):
                 for k, v in data["prompts"].items():
                     cfg["prompts"][k] = _normalize_entry(v)
+    except FileNotFoundError:
+        log.debug("config.json missing, using built-in defaults")  # 首次部署常见，debug 即可
     except (OSError, ValueError, json.JSONDecodeError):
-        pass  # 缺失/损坏 → 用内置默认
+        log.warning("config.json corrupt/unreadable, using built-in defaults")  # 损坏 → warning（#15）
     return cfg

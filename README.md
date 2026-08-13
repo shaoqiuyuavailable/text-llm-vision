@@ -289,6 +289,8 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 7. **历史图配额（已修复的坑）**：早期版本历史占位图也消耗 `MAX_IMAGES_PER_REQ=3` 配额，长会话里旧图堆满后，当前真正要识别的图会被误判「超上限」替换成占位符——表现为**代理日志一切正常（has_image=True、上游 200）但模型实际收不到识别结果**。现已在 `_convert_images` 区分「历史占位」与「当前识别」，历史图不再挤占配额（见「请求流转」）。**遇到「能发消息但模型像没看到图」时优先怀疑此环节**。
 8. **日志系统（代理整体日志）**：写 `vision-proxy.log`，**成功路径（正常发出/接收）只记 debug 级不刷屏；兜底路径（识别失败/超限/历史占位/off/非 image 块）和异常（上游连接失败、非 2xx、解析错误）记 warning/error 落盘**，每条带请求 ID `rid` 可追踪整个生命周期。按天滚动，保留 3 天自动清理（`TimedRotatingFileHandler` + 启动时清理双保险）。`/health` 端点返回 pid / 档位 / 代码 mtime / uptime，供验活。
 9. **图片大小限制**：单图超过 10MB 不识别，替换占位符 `[图片N（超过10MB，未识别）]` 并记 warning，防内存/耗时失控。非 image 块（`document` 等）原样透传但记 warning。
+10. **识别超时兜底（#13）**：Ollama 僵死/极慢时，识别可能无限挂起（`asyncio.to_thread` 无超时）。现已用 `asyncio.wait_for` 加**总超时**（按档位 fast 45s / standard 60s / deep 120s），超时后**所有图片替换为占位符**（`[图片（识别超时，已省略）]`）并继续转发——请求不死、纯文本模型不收到 image 块，但该次识别结果丢失。
+11. **依赖缺失兜底（#5）**：`start-proxy.bat` 启动前预检 `python` + `uvicorn/fastapi/httpx`，失败给出明确提示；启动后用 `/health` 验活（而非只看端口），端口占用但无响应时告警。state/config 回退（#15/#16）不再静默——损坏时记 warning 落日志。
 
 ## 文件清单
 
