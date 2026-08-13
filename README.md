@@ -283,7 +283,7 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 1. **VS Code 扩展的 Read hook 绕过**（[upstream bug #37540](https://github.com/anthropics/claude-code/issues/37540)）：扩展的工具执行层绕过 PreToolUse hook，Read 图片 hook 不生效。因此「模型自主看图」走 **MCP describe_image**（不依赖 hook），而非 hook。**不要用 Read 读图片**（返回 `[Unsupported Image]`）。
 2. **auto mode 分类器与第三方模型不兼容**（[upstream #68387](https://github.com/anthropics/claude-code/issues/68387)）：DeepSeek/GLM 等第三方模型驱动不了官方分类器，报「temporarily unavailable」是误导性错误。建议用 `acceptEdits` / `bypassPermissions` 权限模式，或把常用命令加进 `permissions.allow`。
 3. **8B 模型边界**：Qwen2.5-VL(8B) 对复杂图表/长文档精细 OCR 弱于大模型；对「无鲸鱼/文字硬线索的角色」无法自行联想到品牌（需要主模型结合上下文复核）。
-4. **缓存轻量化**：同图 sha256 **内存缓存**（不落盘、不占用磁盘）；上限 100 条 FIFO 清理（防内存无限膨胀）；`/vision off` 时主动清空缓存 + `ollama stop` 释放显存。代理进程重启后缓存自然清空。
+4. **缓存轻量化（仅 deep 档）**：同图 sha256 **内存缓存**（不落盘、不占用磁盘），**只在 `deep` 档(3)启用**——fast/standard 各 1-2 次调用，缓存收益趋近于零；deep 是 3-4 次调用（scan+zoom+guess+spatial），「同图重试 / 重复粘贴」时缓存才省时。key 含 **model + 温度**，换模型/改温度后不命中旧缓存；上限 100 条 FIFO 清理；`/vision off` 时主动清空缓存 + `ollama stop` 释放显存；代理进程重启后缓存自然清空。
 5. **软路由失效风险（已知）**：`CLAUDE.md` 引导模型用 `describe_image` 属「软约束」，第三方模型（如 GLM）可能无视指令固执调用原生 Read 工具，触发 upstream bug（见第 1 条）。当前无代理层强制手段，属已知限制；若遇模型不听话，需手动提示改用 `describe_image`。
 6. **SSE 流式**：代理用 `aiter_bytes()` **流式透传不缓冲**，保留打字机效果（不受拦截影响）。
 7. **历史图配额（已修复的坑）**：早期版本历史占位图也消耗 `MAX_IMAGES_PER_REQ=3` 配额，长会话里旧图堆满后，当前真正要识别的图会被误判「超上限」替换成占位符——表现为**代理日志一切正常（has_image=True、上游 200）但模型实际收不到识别结果**。现已在 `_convert_images` 区分「历史占位」与「当前识别」，历史图不再挤占配额（见「请求流转」）。**遇到「能发消息但模型像没看到图」时优先怀疑此环节**。
