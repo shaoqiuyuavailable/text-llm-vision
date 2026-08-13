@@ -12,7 +12,8 @@ import vision_client
 
 
 def identify(path: str) -> str:
-    return vision_client.scan(path)
+    # scan 返回 (desc, main, sub) 元组，取描述字符串（避免结果写成元组）
+    return vision_client.scan(path)[0]
 
 
 def main():

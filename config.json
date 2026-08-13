@@ -6,6 +6,10 @@
     "top_p": 0.8,
     "precision": "fast"
   },
+  "security": {
+    "identify_token": "",
+    "identify_allowed_dirs": []
+  },
   "scenes": {
     "person": {
       "sub": ["anime", "real", "group"],
