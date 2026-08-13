@@ -36,6 +36,10 @@
 
 ## 架构
 
+> **为什么需要这套机制（重要背景）**：本项目的核心目标是把图片识别能力「接进」纯文本模型的主流程。
+> 但 VS Code 扩展存在一个**上游 bug**（[#37540](https://github.com/anthropics/claude-code/issues/37540)）：它的工具执行层**绕过 PreToolUse hook**，导致「Read 图片时用 hook 拦截识图」这条路在 VS Code 里根本走不通。
+> 因此本架构**刻意避开 hook**，改用「MCP 工具（模型主动识图）+ 反向代理（兜底粘贴图）+ CLAUDE.md 软规则（引导模型）」三层组合。**这不是设计上的炫技，而是为了绕过 VS Code hook bug 的务实选择。** 如果 hook 在 VS Code 里正常，本可少做一层；但在 bug 修复前，这套机制是让纯文本模型可靠看图的唯一路径。
+
 ```
 模型需要看图
   ├─ ① 主动识图 → MCP 工具 describe_image → 本地 Qwen2.5-VL 识别 → 文字描述
