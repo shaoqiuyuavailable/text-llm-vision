@@ -24,18 +24,19 @@ code --install-extension text-llm-vision-*.vsix
 
 ## 使用
 
-侧边栏活动栏点 **Vision** 图标 → 控制台面板：
+侧边栏活动栏点 **Vision** 图标 → **树视图面板**（TreeView），节点实时显示状态，**点击节点弹选择器/输入框修改**，每 5s 自动刷新：
 
-| 区域 | 操作 | 底层调用 |
+| 树节点 | 点击操作 | 底层调用 |
 |------|------|---------|
-| 健康横幅 | 显示代理 pid/版本/uptime；代理未运行时「启动代理」 | `GET /api/status`、`start_proxy.py` |
-| 档位 | 0/1/2/3 一键切换（off 自动 `ollama stop` 释放显存） | `POST /api/level` |
-| 后端 | 本地 / 云端 + 厂商下拉 | `POST /api/backend` |
-| 端口 | 输入应用（改后提示需重启代理/会话） | `POST /api/backend` |
-| 识别参数 | 温度 / top_p / 上游（白名单键） | `POST /api/config` |
-| 状态 | ollama 服务 + 各云端厂商 key 状态 | `GET /api/status` |
+| 档位: fast (1) | 选 off/fast/standard/deep（off 自动 `ollama stop`） | `POST /api/level` |
+| 后端: local | 选本地/云端 + 厂商 | `POST /api/backend` |
+| 端口: 8787 | 输入端口（改后提示需重启代理/会话） | `POST /api/backend` |
+| 温度 / top_p | 输入数值 | `POST /api/config` |
+| 上游: … | 输入地址 | `POST /api/config` |
+| 云端厂商 | 点厂商切换 | `POST /api/backend` |
+| 代理 / ollama | 只读状态 | `GET /api/status` |
 
-面板每 5s 自动轮询刷新。
+代理未运行时显示「⚠ 代理未运行」+「▶ 启动代理」节点（spawn 启动 `start_proxy.py`，不弹 cmd 窗口）。
 
 ## 设置
 
@@ -47,16 +48,18 @@ code --install-extension text-llm-vision-*.vsix
 ## 架构
 
 ```
-Webview View（webview/）──postMessage──▶ extension.js（主线程）
-                                              │  fetch
-                                              ▼
-                              代理 /api/*（control_api.py）
-                                              │  import toggle + config_loader
-                                              ▼
-                              config.json / state / ollama
+TreeView（registerTreeDataProvider）──▶ extension.js（主线程）
+                                            │  fetch
+                                            ▼
+                            代理 /api/*（control_api.py）
+                                            │  import toggle + config_loader
+                                            ▼
+                            config.json / state / ollama
 ```
 
-webview 因 CSP 不能直连 localhost，统一由主线程 fetch 后 postMessage 回传。
+## 为何用 TreeView 而非 WebviewView
+
+本环境（Claude Code for VS Code）下 WebviewView 的 `resolveWebviewView` **不触发**——provider 注册成功、扩展正常激活，但视图内容不渲染（报「没有可提供视图数据的已注册数据提供程序」）。TreeView 走 `registerTreeDataProvider`（`createTreeView`），机制完全不同，稳定可靠。
 
 ## 已知限制
 

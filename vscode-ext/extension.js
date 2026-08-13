@@ -1,15 +1,16 @@
-// text-llm-vision 可视化插件主线程。
-// 职责：侧边栏 Webview View + 把 webview 的 postMessage 转发成对代理 /api/* 的 HTTP 调用。
-// 复用约定：所有配置读写都走 proxy 的控制 API（内部复用 toggle/config_loader），本文件不碰任何后端逻辑。
+// text-llm-vision 可视化插件（TreeView 版）。
+// WebviewView 在当前环境（Claude Code for VS Code）resolve 不触发，改用 TreeView：
+// 侧边栏树节点展示状态，点击节点弹 QuickPick/输入框修改配置，经代理 /api/* 生效。
 'use strict';
 
 const vscode = require('vscode');
-const { exec } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const DEPLOY_DIR = () => path.join(os.homedir(), '.claude', 'vision-eyes');
+const LEVEL_NAMES = { 0: 'off', 1: 'fast', 2: 'standard', 3: 'deep' };
 
 // 读控制 API 地址：vision.proxyUrl 显式覆盖 > vision.port > 部署目录 config.json 的 port
 function readConfig() {
@@ -26,11 +27,13 @@ function readConfig() {
   return { port, baseUrl };
 }
 
-// 调代理控制 API（带 8s 超时）。失败不抛，返回 {ok,status,data}
 async function api(baseUrl, method, p, body) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8000);
+  // 全程 try/catch：任何异常都不外抛（防未捕获 rejection 崩扩展宿主→循环重启弹窗）
+  let ctrl = null;
+  let timer = null;
   try {
+    ctrl = new AbortController();
+    timer = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, 8000);
     const resp = await fetch(`${baseUrl}${p}`, {
       method,
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
@@ -42,106 +45,190 @@ async function api(baseUrl, method, p, body) {
   } catch (e) {
     return { ok: false, status: 0, data: { error: e.message || String(e) } };
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 }
 
-class VisionViewProvider {
-  constructor(context) {
-    this.context = context;
-    this.view = null;
-  }
-
-  resolveWebviewView(webviewView) {
-    this.view = webviewView;
-    webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = this._html(webviewView.webview);
-    webviewView.webview.onDidReceiveMessage((msg) => this._onMessage(msg));
-    this._refresh();
-  }
-
-  async _onMessage(msg) {
-    switch (msg.type) {
-      case 'refresh': await this._refresh(); break;
-      case 'setLevel': await this._post('/api/level', { level: msg.level }); break;
-      case 'setBackend': await this._post('/api/backend', msg.payload); break;
-      case 'setConfig': await this._post('/api/config', { patch: msg.payload }); break;
-      case 'startProxy': await this._startProxy(); break;
+class VisionTreeItem extends vscode.TreeItem {
+  constructor(label, contextValue, description, action) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = contextValue || 'info';
+    this.description = description || '';
+    if (action) {
+      this.command = { command: 'vision.action', title: '操作', arguments: [action] };
     }
   }
+}
 
-  async _post(p, body) {
-    const { baseUrl } = readConfig();
-    const res = await api(baseUrl, 'POST', p, body);
-    if (res.ok) {
-      await this._send({ type: 'result', ok: true });
-      if (res.data.port_changed_requires_restart) {
-        await this._send({ type: 'notice', text: '端口已改：需重启代理 / 会话才生效' });
-      }
-      await this._refresh();
-    } else {
-      await this._send({ type: 'result', ok: false, error: res.data.error || `HTTP ${res.status}` });
-    }
+class VisionTreeProvider {
+  constructor() {
+    this._onDidChangeTreeData = new vscode.EventEmitter();
+    this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    this.status = null;
   }
+  refresh() { this._onDidChangeTreeData.fire(); }
 
-  async _refresh() {
-    const { baseUrl } = readConfig();
-    const res = await api(baseUrl, 'GET', '/api/status');
-    const startable = fs.existsSync(path.join(DEPLOY_DIR(), 'start_proxy.py'));
-    await this._send({
-      type: 'status',
-      ok: res.ok,
-      error: res.ok ? null : (res.data.error || '代理未运行'),
-      data: res.ok ? res.data : null,
-      startable,
+  async getChildren() {
+    const items = [];
+    let res;
+    try {
+      const { baseUrl } = readConfig();
+      res = await api(baseUrl, 'GET', '/api/status');
+    } catch (e) {
+      items.push(new VisionTreeItem('⚠ 读取状态异常', 'info', (e && e.message) || String(e)));
+      return items;
+    }
+    if (!res.ok) {
+      items.push(new VisionTreeItem('⚠ 代理未运行', 'proxyDown', (res.data && res.data.error) || ''));
+      items.push(new VisionTreeItem('▶ 启动代理', 'startProxy', '', { kind: 'startProxy' }));
+      return items;
+    }
+    const d = res.data;
+    this.status = d;
+    items.push(new VisionTreeItem(`档位: ${LEVEL_NAMES[d.level] || d.level} (${d.level})`, 'level', '点击切换', { kind: 'level' }));
+    items.push(new VisionTreeItem(`后端: ${d.backend}${d.active_provider ? ' (' + d.active_provider + ')' : ''}`, 'backend', '点击切换', { kind: 'backend' }));
+    items.push(new VisionTreeItem(`端口: ${d.port}`, 'port', '点击修改', { kind: 'port' }));
+    items.push(new VisionTreeItem(`温度: ${d.ollama && d.ollama.temperature !== undefined ? d.ollama.temperature : '-'}`, 'temp', '点击修改', { kind: 'temp' }));
+    items.push(new VisionTreeItem(`top_p: ${d.ollama && d.ollama.top_p !== undefined ? d.ollama.top_p : '-'}`, 'topp', '点击修改', { kind: 'topp' }));
+    items.push(new VisionTreeItem(`上游: ${d.upstream || '-'}`, 'upstream', '点击修改', { kind: 'upstream' }));
+    items.push(new VisionTreeItem('── 云端厂商 ──', 'header', ''));
+    (d.cloud || []).forEach((c) => {
+      items.push(new VisionTreeItem(`${c.name}: ${c.model || '(未配model)'} key=${c.has_key ? '✓' : '✗'}`,
+        'provider', c.name === d.active_provider ? '当前' : '点击切换', { kind: 'provider', provider: c.name }));
     });
+    items.push(new VisionTreeItem(`代理: ${d.proxy && d.proxy.status === 'ok' ? '运行中' : '?'} v${(d.proxy && d.proxy.version) || '?'} · pid ${(d.proxy && d.proxy.pid) || '?'}`, 'info', ''));
+    items.push(new VisionTreeItem(`ollama: ${d.ollama_service && d.ollama_service.running ? '运行中 ' + (d.ollama_service.model || '') : '未运行'}`, 'info', ''));
+    return items;
   }
 
-  _startProxy() {
+  getTreeItem(element) { return element; }
+}
+
+async function post(baseUrl, p, body) {
+  const res = await api(baseUrl, 'POST', p, body);
+  if (!res.ok) {
+    vscode.window.showErrorMessage('请求失败: ' + ((res.data && res.data.error) || `HTTP ${res.status}`));
+    return null;
+  }
+  return res.data;
+}
+
+function startProxy() {
+  return new Promise((resolve) => {
     const py = path.join(DEPLOY_DIR(), 'start_proxy.py');
     if (!fs.existsSync(py)) {
-      return this._send({ type: 'notice', text: '未找到 start_proxy.py（先运行 install.py 部署）' });
+      vscode.window.showErrorMessage('未找到 start_proxy.py（先运行 install.py 部署）');
+      return resolve();
     }
     const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
-    exec(`"${pythonCmd}" "${py}"`, { cwd: path.dirname(py), windowsHide: true, timeout: 30000 }, async (err, stdout) => {
-      await this._send({ type: 'notice', text: (stdout || '').trim() || (err ? (err.message || String(err)) : '代理已启动') });
-      await this._refresh();
+    // spawn + windowsHide + detached + stdio ignore：Windows 上不弹 cmd 黑窗的标准做法
+    const child = spawn(pythonCmd, [py], {
+      cwd: path.dirname(py),
+      windowsHide: true,
+      detached: true,
+      stdio: 'ignore',
     });
-    return Promise.resolve();
-  }
-
-  async _send(msg) {
-    if (this.view) await this.view.webview.postMessage(msg);
-  }
-
-  _html(webview) {
-    const getUri = (p) => webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', p));
-    const csp = webview.cspSource;
-    return `<!DOCTYPE html>
-<html lang="zh-CN"><head>
-<meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp}; script-src ${csp};">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="${getUri('style.css')}">
-<title>Vision 控制台</title>
-</head><body>
-<div id="toast" class="toast" style="display:none"></div>
-<div id="app"></div>
-<script src="${getUri('main.js')}"></script>
-</body></html>`;
-  }
+    child.on('error', (err) => {
+      vscode.window.showErrorMessage('启动代理失败: ' + err.message);
+      resolve();
+    });
+    child.on('exit', (code) => {
+      vscode.window.showInformationMessage(code === 0 ? '代理已启动（或已在运行）' : `启动代理结束，退出码 ${code}`);
+      resolve();
+    });
+    child.unref();
+  });
 }
 
 function activate(context) {
-  const provider = new VisionViewProvider(context);
+  const provider = new VisionTreeProvider();
+  try {
+    const treeView = vscode.window.createTreeView('vision.view', { treeDataProvider: provider, showCollapseAll: false });
+    context.subscriptions.push(treeView);
+  } catch (e) {
+    vscode.window.showErrorMessage('Vision TreeView 创建失败: ' + ((e && e.message) || e));
+  }
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('vision.view', provider,
-      { webviewOptions: { retainContextWhenHidden: true } }),
-    vscode.commands.registerCommand('vision.refresh', () => provider._refresh()),
-    vscode.commands.registerCommand('vision.startProxy', () => provider._startProxy())
+    vscode.commands.registerCommand('vision.action', async (action) => {
+      if (!action) return;
+      const { baseUrl } = readConfig();
+      try {
+        switch (action.kind) {
+          case 'startProxy':
+            await startProxy();
+            break;
+          case 'level': {
+            const pick = await vscode.window.showQuickPick(
+              [{ label: 'off (0)', value: 0 }, { label: 'fast (1)', value: 1 },
+               { label: 'standard (2)', value: 2 }, { label: 'deep (3)', value: 3 }],
+              { placeHolder: '选择档位' });
+            if (pick) await post(baseUrl, '/api/level', { level: pick.value });
+            break;
+          }
+          case 'backend': {
+            const pick = await vscode.window.showQuickPick(
+              [{ label: '本地 (local)', value: 'local' }, { label: '云端 (cloud)', value: 'cloud' }],
+              { placeHolder: '选择后端' });
+            if (!pick) break;
+            if (pick.value === 'cloud') {
+              if (provider.status && provider.status.cloud && provider.status.cloud.length) {
+                const prov = await vscode.window.showQuickPick(
+                  provider.status.cloud.map((c) => ({ label: c.name + (c.has_key ? ' ✓' : ' (无key)'), value: c.name })),
+                  { placeHolder: '选择云端厂商' });
+                if (prov) await post(baseUrl, '/api/backend', { kind: 'cloud', provider: prov.value });
+              } else {
+                vscode.window.showErrorMessage('未配置任何云端厂商（编辑 config.json cloud.clouds）');
+              }
+            } else {
+              await post(baseUrl, '/api/backend', { kind: 'local' });
+            }
+            break;
+          }
+          case 'port': {
+            const cur = provider.status ? provider.status.port : 8787;
+            const val = await vscode.window.showInputBox({
+              value: String(cur), prompt: '输入新端口（需重启代理/会话才生效）',
+              validateInput: (v) => /^\d{1,5}$/.test(v) ? null : '端口必须是数字',
+            });
+            if (val !== undefined) {
+              const r = await post(baseUrl, '/api/backend', { kind: 'local', port: +val });
+              if (r && r.port_changed_requires_restart) vscode.window.showWarningMessage('端口已改，需重启代理 / 会话才生效');
+            }
+            break;
+          }
+          case 'temp':
+          case 'topp': {
+            const cur = provider.status && provider.status.ollama ? provider.status.ollama[action.kind] : undefined;
+            const val = await vscode.window.showInputBox({
+              value: cur !== undefined ? String(cur) : '',
+              prompt: `输入 ${action.kind}（0-1 数值）`,
+              validateInput: (v) => isNaN(+v) ? '必须是数字' : null,
+            });
+            if (val !== undefined) await post(baseUrl, '/api/config', { ollama: { [action.kind]: +val } });
+            break;
+          }
+          case 'upstream': {
+            const cur = provider.status ? provider.status.upstream : '';
+            const val = await vscode.window.showInputBox({ value: cur || '', prompt: '输入上游地址（纯文本模型真实端点）' });
+            if (val !== undefined && val.trim()) await post(baseUrl, '/api/config', { upstream: val.trim() });
+            break;
+          }
+          case 'provider':
+            if (action.provider) await post(baseUrl, '/api/backend', { kind: 'cloud', provider: action.provider });
+            break;
+        }
+      } catch (e) {
+        vscode.window.showErrorMessage('操作失败: ' + ((e && e.message) || e));
+      }
+      provider.refresh();
+    }),
+    vscode.commands.registerCommand('vision.refresh', () => provider.refresh())
   );
+  // 每 5s 自动刷新（轻量，仅读状态；异常不外抛）
+  const timer = setInterval(() => { try { provider.refresh(); } catch (e) {} }, 5000);
+  context.subscriptions.push({ dispose: () => clearInterval(timer) });
 }
-exports.activate = activate;
 
+exports.activate = activate;
 function deactivate() {}
 exports.deactivate = deactivate;

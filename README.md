@@ -353,18 +353,23 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 
 ## VS Code 可视化插件（动态展示 + 修改配置）
 
-侧边栏插件，在 Claude Code for VS Code 里**可视化调节**配置，不再只靠 `/vision` 文本命令。复用代理新增的**控制 API**（`/api/*`，内部复用 `control_api.py` → `toggle`/`config_loader`），插件只是薄 UI，不碰识别逻辑。
+侧边栏插件，在 Claude Code for VS Code 里**可视化调节**配置。复用代理的**控制 API**（`/api/*`，内部复用 `control_api.py` → `toggle`/`config_loader`），插件只是薄 UI，不碰识别逻辑。
 
-| 控制台区域 | 操作 | 底层调用 |
+**实现（TreeView 树视图）**：侧边栏树节点实时显示状态，**点击节点弹选择器/输入框修改**，每 5s 自动刷新。
+
+| 树节点 | 点击操作 | 底层调用 |
 |---|---|---|
-| 健康横幅 | 代理 pid/版本/uptime；未运行时一键「启动代理」 | `GET /api/status` |
-| 档位 | 0/1/2/3 一键切换（off 自动释放显存） | `POST /api/level` |
-| 后端 | 本地 / 云端 + 厂商下拉 | `POST /api/backend` |
-| 端口 | 输入应用（改后提示需重启） | `POST /api/backend` |
-| 识别参数 | 温度 / top_p / 上游（白名单键） | `POST /api/config` |
-| 状态 | ollama 服务 + 云端厂商 key 状态 | `GET /api/status` |
+| 档位: fast (1) | 选 off/fast/standard/deep | `POST /api/level` |
+| 后端: local | 选本地/云端 + 厂商 | `POST /api/backend` |
+| 端口: 8787 | 输入端口（提示需重启） | `POST /api/backend` |
+| 温度 / top_p | 输入数值 | `POST /api/config` |
+| 上游: … | 输入地址 | `POST /api/config` |
+| 云端厂商 | 点厂商切换 | `POST /api/backend` |
+| 代理 / ollama | 只读状态 | `GET /api/status` |
 
-面板每 5s 自动轮询。**安装**：`vscode-ext/` 下 `F5` 调试开发，或 `bash scripts/package.sh` 打包 `.vsix` 安装（详见 `vscode-ext/README.md`）。
+**安装**：`vscode-ext/` 下 `bash scripts/package.sh` 打包 `.vsix` → `code --install-extension`；或 `code .` + F5 调试开发（详见 `vscode-ext/README.md`）。
+
+> **为何用 TreeView 而非 WebviewView**：本环境（Claude Code for VS Code）下 WebviewView 的 `resolveWebviewView` **不触发**（provider 注册成功、但视图内容不渲染，报「没有可提供视图数据的已注册数据提供程序」）。TreeView 走 `registerTreeDataProvider`，机制完全不同，稳定可靠。
 
 ## 视觉档位
 
