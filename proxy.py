@@ -128,6 +128,32 @@ async def _iter_upstream(resp, rid: str):
 MAX_IMAGES_PER_REQ = 3      # 每请求最多真识别的图片数
 MAX_IMAGE_B64 = 10 * 1024 * 1024 * 4 // 3  # 10MB 二进制对应的 base64 长度上限（约 13.98MB 字符）
 
+# 上游转发重试：DeepSeek 网络偶发 ConnectError/ReadError/5xx（上游层问题，只重试不重试代码逻辑）。
+# 连接类错误和 5xx 重试 1 轮（共 2 次尝试）；4xx（业务错误）不重试。
+_RETRYABLE_ERR = (httpx.ConnectError, httpx.ReadError, httpx.ReadTimeout, httpx.ConnectTimeout,
+                  httpx.RemoteProtocolError, httpx.WriteError)
+_RETRY_STATUS = {500, 502, 503, 504}
+
+
+async def _send_with_retry(client, req, rid, tag: str, retries: int = 1):
+    """发送请求，连接错误/5xx 时重试 1 轮。返回 (resp, 是否重试过)。"""
+    for attempt in range(retries + 1):
+        try:
+            resp = await client.send(req, stream=True)
+            if resp.status_code in _RETRY_STATUS and attempt < retries:
+                log.warning("req=%s %s status=%d (retryable 5xx), attempt %d/%d",
+                            rid, tag, resp.status_code, attempt + 1, retries + 1)
+                await resp.aclose()
+                continue
+            return resp, attempt > 0
+        except _RETRYABLE_ERR as e:
+            if attempt < retries:
+                log.warning("req=%s %s %s (retry), attempt %d/%d",
+                            rid, tag, type(e).__name__, attempt + 1, retries + 1)
+                continue
+            raise
+    raise RuntimeError("unreachable")
+
 
 def _convert_images(body: dict) -> tuple[dict, bool, dict]:
     """把 body 里 messages 中的 image 块转成文字。返回 (新body, 是否发生转换, 统计dict)。
@@ -355,15 +381,17 @@ async def messages(request: Request):
     req = client.build_request("POST", f"{UPSTREAM}/v1/messages",
                                headers=fwd_headers(request), json=body)
     try:
-        resp = await client.send(req, stream=True)
+        resp, retried = await _send_with_retry(client, req, rid, "messages")
     except Exception as e:
         log.error("req=%s upstream_error %s: %s duration=%.2fs",
                   rid, type(e).__name__, e, time.time() - t2, exc_info=True)
         raise
     if resp.status_code >= 400:
-        log.warning("req=%s upstream status=%d duration=%.2fs", rid, resp.status_code, time.time() - t2)
+        log.warning("req=%s upstream status=%d duration=%.2fs%s",
+                    rid, resp.status_code, time.time() - t2, " (retried)" if retried else "")
     else:
-        log.debug("req=%s upstream status=%d duration=%.2fs", rid, resp.status_code, time.time() - t2)
+        log.debug("req=%s upstream status=%d duration=%.2fs%s",
+                  rid, resp.status_code, time.time() - t2, " (retried)" if retried else "")
     log.debug("req=%s done total=%.2fs", rid, time.time() - t0)
     return _forward(resp, client, rid)
 
@@ -427,17 +455,17 @@ async def passthrough(request: Request, path: str):
     req = client.build_request(request.method, f"{UPSTREAM}/{path}",
                                headers=fwd_headers(request), content=await request.body())
     try:
-        resp = await client.send(req, stream=True)
+        resp, retried = await _send_with_retry(client, req, rid, f"passthrough {request.method} /{path}")
     except Exception as e:
         log.error("req=%s passthrough %s /%s error %s: %s duration=%.2fs",
                   rid, request.method, path, type(e).__name__, e, time.time() - t0, exc_info=True)
         raise
     if resp.status_code >= 400:
-        log.warning("req=%s passthrough %s /%s status=%d duration=%.2fs",
-                    rid, request.method, path, resp.status_code, time.time() - t0)
+        log.warning("req=%s passthrough %s /%s status=%d duration=%.2fs%s",
+                    rid, request.method, path, resp.status_code, time.time() - t0, " (retried)" if retried else "")
     else:
-        log.debug("req=%s passthrough %s /%s status=%d duration=%.2fs",
-                  rid, request.method, path, resp.status_code, time.time() - t0)
+        log.debug("req=%s passthrough %s /%s status=%d duration=%.2fs%s",
+                  rid, request.method, path, resp.status_code, time.time() - t0, " (retried)" if retried else "")
     return _forward(resp, client, rid)
 
 

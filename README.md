@@ -176,10 +176,12 @@ mkdir -p ~/.claude/vision-eyes
 
 ### 4. 启动代理
 
+代理端口由 `config.json` 的 `port` 字段决定（默认 `8787`）。切换端口：`vision port <N>`（或 `python toggle.py port <N>`），会写 config.json 并提示同步 CC Switch / MCP / settings 三处（见「已知限制」第 14 条）。
+
 **手动启动**：
 ```bash
 cd ~/.claude/vision-eyes
-python -m uvicorn proxy:app --port 8787
+python -m uvicorn proxy:app --port $(python read_port.py)
 ```
 
 **自动启动（推荐）**：在 `~/.claude/settings.json` 配 SessionStart hook，Claude Code 启动时自动拉起代理：
@@ -195,11 +197,11 @@ python -m uvicorn proxy:app --port 8787
 }
 ```
 
-> 本仓库 `start-proxy.bat` 做了幂等检查（端口已监听则不重复启动）。
+> `start-proxy.bat` 是薄壳，实际逻辑在 `start_proxy.py`（纯 Python）：读 config 端口 → `/health` 验活（已在运行则跳过）→ 依赖预检 → 脱离启动 uvicorn → 等待验活。
 
 ### 5. 指向代理 ⚠️ **最后一步，做好回退准备**
 
-设置 `ANTHROPIC_BASE_URL=http://localhost:8787`（可通过 CC Switch 或改 `~/.claude/settings.json` 的 env）：
+设置 `ANTHROPIC_BASE_URL=http://localhost:<端口>`（默认 8787；可通过 CC Switch 或改 `~/.claude/settings.json` 的 env，端口以 `config.json` 的 `port` 为准）：
 
 ```json
 { "env": { "ANTHROPIC_BASE_URL": "http://localhost:8787" } }
@@ -222,6 +224,8 @@ python -m uvicorn proxy:app --port 8787
 claude mcp add --scope user vision -e VISION_IDENTIFY_URL=http://127.0.0.1:8787 \
   -- node "C:\Users\<USERNAME>\.claude\vision-eyes\mcp-vision.js"
 ```
+
+> `VISION_IDENTIFY_URL` 的端口要与 `config.json` 的 `port` 一致；若用 `vision port <N>` 改了端口，需同步此处的 URL。
 
 确认：`claude mcp list` 应显示 `vision ... ✔ Connected`。
 
