@@ -69,7 +69,7 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 ## 三次判定识别（核心能力）
 
-本地识别不是「简单描述」，而是**三次判定 + 场景分层 + 温度分层**：
+本地识别不是「简单描述」，而是**三次判定 + 场景分层 + 温度分层**。通过视觉档位（`/vision 1/2/3`）接入主流程——代理贴图和 MCP `describe_image` 都读取档位：
 
 ```
 第1次 scan：一句话描述 + 判断 大类+小类
@@ -78,6 +78,8 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
    ↓（注入 scan+zoom）
 第3次 guess：基于事实大胆推测（敢猜，列候选+置信度）
 ```
+
+档位决定调用次数：`1=fast`（仅 scan 的描述部分）、`2=standard`（scan+zoom）、`3=deep`（scan+zoom+guess 完整三次）。档位设置见「视觉档位开关」章节。
 
 **场景分层**（5 大类 × 小类）：
 
@@ -210,9 +212,18 @@ claude mcp add --scope user vision -e VISION_IDENTIFY_URL=http://127.0.0.1:8787 
 
 将「看图规范」（见文末附录）写入 `~/.claude/CLAUDE.md`，引导模型用 `describe_image` 而非 Read 图片。
 
-### 8. 视觉开关（可选）
+### 8. 视觉档位开关（可选）
 
-`/vision on|off` 斜杠命令切换。需在 `~/.claude/commands/vision.md` 放命令定义，并在 `permissions.allow` 加 `Bash(python *vision-eyes*toggle.py *)`。
+`/vision <档位>` 斜杠命令切换，`0/1/2/3` 四个档位（`on`→1，`off`→0 向后兼容）：
+
+| 档位 | 命令 | 识别次数 | 耗时 | 输出 |
+|------|------|---------|------|------|
+| 0 = off | `/vision off` / `/vision 0` | 0 | — | 图片→占位「视觉已关闭」 |
+| 1 = fast | `/vision on` / `/vision 1` | 1 次 | ~15s | 单句描述（默认） |
+| 2 = standard | `/vision 2` | 2 次 | ~30s | 描述 + 场景 + 按类细节 |
+| 3 = deep | `/vision 3` | 3 次 | ~45s | 完整三次判定（含推测） |
+
+代理和 MCP（`describe_image`）都读取该档位：0 不识别，1/2/3 对应 `fast/standard/deep` 精度。需在 `~/.claude/commands/vision.md` 放命令定义，并在 `permissions.allow` 加 `Bash(python *vision-eyes*toggle.py *)`。
 
 ### 9. 重启 Claude Code
 
@@ -234,13 +245,16 @@ python scan_one.py <图片路径>             # JSON 输出（供脚本/代理�
 python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集语料
 ```
 
-## 视觉开关
+## 视觉档位
 
-`/vision on|off` 控制「图片是否识别」：
-- `on`：图片 → 本地识别 → 文字描述
-- `off`：图片 → 占位文字「视觉已关闭，未识别」
+`/vision <档位>` 控制「识别不识别 + 精度」，状态存 `~/.claude/vision-eyes/state`（`0/1/2/3`）：
 
-状态文件 `~/.claude/vision-eyes/state`（on/off）。
+- `0`（off）：图片 → 占位文字「视觉已关闭，未识别」
+- `1`（fast，默认）：图片 → 单句描述（1 次识别调用）
+- `2`（standard）：图片 → 描述 + 场景 + 按类细节（2 次调用）
+- `3`（deep）：图片 → 完整三次判定含推测（3 次调用）
+
+`on`/`off` 向后兼容（on→1，off→0）。代理和 MCP 都读取该档位。
 
 ## 已知限制
 
@@ -263,7 +277,7 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `scan_one.py` | 单图 scan JSON 输出 |
 | `collect_images.py` | Wikimedia 类别语料采集 |
 | `mcp-vision.js` | MCP server：describe_image 工具 |
-| `toggle.py` | 视觉开关（写 state） |
+| `toggle.py` | 视觉档位开关（写 state 0/1/2/3） |
 | `start-proxy.bat` / `status.bat` | 启动代理 / 状态栏 |
 | `test_proxy.py` | 代理端到端测试 |
 
