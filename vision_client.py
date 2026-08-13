@@ -13,17 +13,20 @@ import base64
 import hashlib
 import os
 import re
+import threading
 import httpx
 
 import config_loader
 
 _cache = {}
 MAX_CACHE = 100  # 缓存上限：防内存无限膨胀，超出清最旧（FIFO）
+_cache_lock = threading.Lock()  # 缓存读写锁：防并发重复请求 Ollama
 
 
 def clear_cache():
     """清空识别缓存。off 档时调用，释放内存。"""
-    _cache.clear()
+    with _cache_lock:
+        _cache.clear()
 
 
 # 大类 -> 允许的小类（从 config 读，这里仅为默认兜底）
@@ -45,18 +48,21 @@ def _entry(prompt_key: str) -> dict:
 def _post_b64(b64: str, prompt: str, temperature: float) -> str:
     cfg = config_loader.get()
     o = cfg["ollama"]
-    key = hashlib.sha256((b64 + "|" + prompt).encode()).hexdigest()
-    if key in _cache:
-        return _cache[key]
+    # 缓存 key 含 temperature：温度不同则视为不同结果（防热更新后返回旧值）
+    key = hashlib.sha256((b64 + "|" + prompt + "|" + str(temperature)).encode()).hexdigest()
+    with _cache_lock:
+        if key in _cache:
+            return _cache[key]
     r = httpx.post(o["url"], json={"model": o["model"], "prompt": prompt, "images": [b64],
                                    "stream": False, "options": {"temperature": temperature,
                                                                 "top_p": o["top_p"]}},
                    timeout=300, trust_env=False)
     r.raise_for_status()
     text = r.json()["response"].strip()
-    _cache[key] = text
-    while len(_cache) > MAX_CACHE:  # 超上限清最旧（FIFO）
-        _cache.pop(next(iter(_cache)))
+    with _cache_lock:
+        _cache[key] = text
+        while len(_cache) > MAX_CACHE:  # 超上限清最旧（FIFO）
+            _cache.pop(next(iter(_cache)))
     return text
 
 
@@ -149,7 +155,9 @@ def analyze(path_or_b64: str, precision: str = "") -> str:
         precision = cfg.get("ollama", {}).get("precision", "fast")
     precision = (precision or "fast").lower()
     if precision == "fast":
-        return describe(path_or_b64)
+        # fast 也走 scan：1 次调用即含描述+类别（scan 提示词自带描述要求），供 scene 推理
+        desc, scene, sub = scan(path_or_b64)
+        return f"【初步判断】{desc}\n【场景】{scene}"
     # standard / deep：先 scan 判场景，再 zoom
     desc, scene, sub = scan(path_or_b64)
     facts = zoom(path_or_b64, scene, sub=sub, scan_desc=desc)

@@ -3,6 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
+import config_loader
 import vision_client
 
 # 本代理只服务 DeepSeek（纯文本模型）：通过 CC Switch 让 DeepSeek 的 ANTHROPIC_BASE_URL 指向本代理。
@@ -46,7 +47,7 @@ def _forward(resp, client) -> StreamingResponse:
         resp.aiter_bytes(),
         status_code=resp.status_code,
         headers=headers,
-        background=BackgroundTask(client.aclose),
+        background=BackgroundTask(client.aclose),  # 流式结束后关 client
     )
 
 
@@ -109,8 +110,9 @@ async def messages(request: Request):
         body, changed = await asyncio.to_thread(_convert_images, body)
     except Exception:
         changed = False  # 解析失败 → 原样转发
-    client = httpx.AsyncClient(timeout=None, trust_env=False)
-    req = client.build_request("POST", f"{UPSTREAM}/v1/messages", headers=fwd_headers(request), json=body)
+    client = httpx.AsyncClient(timeout=60.0, trust_env=False)
+    req = client.build_request("POST", f"{UPSTREAM}/v1/messages",
+                               headers=fwd_headers(request), json=body)
     resp = await client.send(req, stream=True)
     return _forward(resp, client)
 
@@ -123,6 +125,13 @@ async def identify(request: Request):
     try:
         body = await request.json()
         img_path = body.get("path", "")
+        # 可选 Bearer Token 鉴权（config.security.identify_token，空=不鉴权）
+        sec = config_loader.get().get("security", {})
+        token = sec.get("identify_token", "")
+        if token:
+            auth = request.headers.get("authorization", "")
+            if auth != f"Bearer {token}":
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
         # 路径沙箱：只允许图片文件，realpath 解析防 `..` 逃逸
         allowed_ext = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
         try:
@@ -133,6 +142,13 @@ async def identify(request: Request):
             return JSONResponse({"error": "bad path"}, status_code=400)
         if not real.lower().endswith(allowed_ext):
             return JSONResponse({"error": "not an image file"}, status_code=400)
+        # 可选目录沙箱（config.security.identify_allowed_dirs，空=不限目录）
+        allowed_dirs = sec.get("identify_allowed_dirs", []) or []
+        if allowed_dirs:
+            real_lower = real.lower()
+            if not any(real_lower.startswith(os.path.realpath(d).lower())
+                       for d in allowed_dirs if d):
+                return JSONResponse({"error": "path outside allowed dirs"}, status_code=400)
         # 按视觉档位识别图片内容（1=fast 2=standard 3=deep）
         lv = vision_level()
         precision = {1: "fast", 2: "standard", 3: "deep"}.get(lv, "fast")
@@ -145,7 +161,7 @@ async def identify(request: Request):
 @app.api_route("/{path:path}", methods=["POST", "GET"])
 async def passthrough(request: Request, path: str):
     # 非 /v1/messages 的所有请求（分类器、count_tokens 等）：原样透传，绝不干预
-    client = httpx.AsyncClient(timeout=None, trust_env=False)
+    client = httpx.AsyncClient(timeout=60.0, trust_env=False)
     req = client.build_request(request.method, f"{UPSTREAM}/{path}",
                                headers=fwd_headers(request), content=await request.body())
     resp = await client.send(req, stream=True)

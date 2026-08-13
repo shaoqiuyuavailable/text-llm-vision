@@ -195,7 +195,7 @@ python -m uvicorn proxy:app --port 8787
 
 > 本仓库 `start-proxy.bat` 做了幂等检查（端口已监听则不重复启动）。
 
-### 5. 指向代理
+### 5. 指向代理 ⚠️ **最后一步，做好回退准备**
 
 设置 `ANTHROPIC_BASE_URL=http://localhost:8787`（可通过 CC Switch 或改 `~/.claude/settings.json` 的 env）：
 
@@ -203,6 +203,15 @@ python -m uvicorn proxy:app --port 8787
 { "env": { "ANTHROPIC_BASE_URL": "http://localhost:8787" } }
 ```
 
+> **⚠️ 重要——这是整个部署的「最后一步」，务必先确认前面所有步骤（代理、Ollama、MCP）都正常，再改这一行。**
+>
+> **为什么是最后一步**：`ANTHROPIC_BASE_URL` 指向代理后，**所有请求（含 auto 模式分类器）都经过代理**。如果代理没启动、或代理有 bug（如连接池改动导致的转发故障），你的会话会「能发消息、收不到回复」——直接断连。
+>
+> **回退准备（务必先做好）**：
+> 1. 记录原直连 URL：`https://api.deepseek.com/anthropic`（或 CC Switch 里当前的 provider 配置）
+> 2. 出问题时，**手动改回直连 + 重启 Claude Code**（会话启动时加载 env，中途改不生效）
+> 3. 或临时关掉代理（代理挂时请求走不通，直连是逃生通道）
+>
 > 只有 DeepSeek（纯文本模型）需要指向代理；其它有视觉的模型用各自真实端点，不经过代理。
 
 ### 6. 注册 MCP server
@@ -242,6 +251,7 @@ claude mcp add --scope user vision -e VISION_IDENTIFY_URL=http://127.0.0.1:8787 
 
 ```
 python identify.py <图片路径>            # 三次判定全流程
+python identify.py <路径> --precision fast|standard|deep  # 指定精度（默认 deep，含空间结构）
 python identify.py <路径> --type person.anime  # 手动指定大类.小类
 python identify.py <路径> --scan|--zoom|--guess
 python identify.py <路径> --ask "自定义问题"

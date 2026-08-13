@@ -7,12 +7,16 @@
 // 注册：claude mcp add vision -e VISION_IDENTIFY_URL=http://127.0.0.1:8787 -- node "绝对路径/mcp-vision.js"
 
 const IDENTIFY_URL = process.env.VISION_IDENTIFY_URL || "http://127.0.0.1:8787/identify";
+// 可选 Bearer token：若代理配了 identify_token，MCP 需带相同 token（否则 401）
+const IDENTIFY_TOKEN = process.env.VISION_IDENTIFY_TOKEN || "";
 
 // 识别：调用本地 /identify，返回图片文字描述
 async function describeImage(path, prompt) {
+  const headers = { "Content-Type": "application/json" };
+  if (IDENTIFY_TOKEN) headers["Authorization"] = `Bearer ${IDENTIFY_TOKEN}`;
   const resp = await fetch(IDENTIFY_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ path, prompt: prompt || "" }),
     signal: AbortSignal.timeout(180000),
   });
