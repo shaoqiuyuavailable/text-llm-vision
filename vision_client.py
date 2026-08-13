@@ -22,11 +22,23 @@ _cache = {}
 MAX_CACHE = 100  # 缓存上限：防内存无限膨胀，超出清最旧（FIFO）
 _cache_lock = threading.Lock()  # 缓存读写锁：防并发重复请求 Ollama
 
+STATE_FILE = os.path.expanduser("~/.claude/vision-eyes/state")
+
 
 def clear_cache():
     """清空识别缓存。off 档时调用，释放内存。"""
     with _cache_lock:
         _cache.clear()
+
+
+def _cache_on() -> bool:
+    """缓存只在 deep 档(3)启用：fast/standard 各 1-2 次调用，缓存收益趋近于零；
+    只有 deep（scan+zoom+guess+spatial，3-4 次调用）在「同图重试/重复粘贴」时
+    缓存省时才值得。档位即开关——读 state 文件，与 proxy.vision_level() 同源。"""
+    try:
+        return open(STATE_FILE).read().strip() == "3"
+    except OSError:
+        return False
 
 
 # 大类 -> 允许的小类（从 config 读，这里仅为默认兜底）
@@ -48,21 +60,25 @@ def _entry(prompt_key: str) -> dict:
 def _post_b64(b64: str, prompt: str, temperature: float) -> str:
     cfg = config_loader.get()
     o = cfg["ollama"]
-    # 缓存 key 含 temperature：温度不同则视为不同结果（防热更新后返回旧值）
-    key = hashlib.sha256((b64 + "|" + prompt + "|" + str(temperature)).encode()).hexdigest()
-    with _cache_lock:
-        if key in _cache:
-            return _cache[key]
+    # 缓存只在 deep 档(3)启用：fast/standard 收益趋近于零，deep 多次调用才值得。
+    use_cache = _cache_on()
+    if use_cache:
+        # 缓存 key 含 model + temperature：换模型/改温度后不命中旧缓存（防拿过期结果）
+        key = hashlib.sha256((o["model"] + "|" + b64 + "|" + prompt + "|" + str(temperature)).encode()).hexdigest()
+        with _cache_lock:
+            if key in _cache:
+                return _cache[key]
     r = httpx.post(o["url"], json={"model": o["model"], "prompt": prompt, "images": [b64],
                                    "stream": False, "options": {"temperature": temperature,
                                                                 "top_p": o["top_p"]}},
                    timeout=120, trust_env=False)
     r.raise_for_status()
     text = r.json()["response"].strip()
-    with _cache_lock:
-        _cache[key] = text
-        while len(_cache) > MAX_CACHE:  # 超上限清最旧（FIFO）
-            _cache.pop(next(iter(_cache)))
+    if use_cache:
+        with _cache_lock:
+            _cache[key] = text
+            while len(_cache) > MAX_CACHE:  # 超上限清最旧（FIFO）
+                _cache.pop(next(iter(_cache)))
     return text
 
 
