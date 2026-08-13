@@ -72,8 +72,9 @@ _cleanup_old_logs()
 
 def vision_level() -> int:
     """读取视觉档位：0=off 1=fast 2=standard 3=deep。
-    兼容旧格式 state 文件（on/off）。"""
+    兼容旧格式 state 文件（on/off）。state 损坏/缺失 → 回退 1 并记 warning。"""
     global _cache_cleared
+    lv = 1
     try:
         raw = open(STATE).read().strip()
         if raw.isdigit():
@@ -81,8 +82,10 @@ def vision_level() -> int:
             lv = lv if 0 <= lv <= 3 else 1
         else:
             lv = 1 if raw != "off" else 0  # 旧 on/off 格式
+    except FileNotFoundError:
+        log.debug("state file missing (default to level 1)")  # 首次启动常见，debug 即可
     except Exception:
-        lv = 1  # 默认 fast
+        log.warning("state corrupt, fallback to level 1")  # 损坏 → warning（#16）
     if lv != 0:
         _cache_cleared = False  # 非 off 时重置，下次 off 再清
     return lv
@@ -198,9 +201,37 @@ def _convert_images(body: dict) -> tuple[dict, bool, dict]:
 def _fmt_stats(stats) -> str:
     if not stats:
         return "(no-image)"
-    return ("images=%d recognized=%d placeholder=%d off=%d failed=%d oversize=%d" % (
+    s = ("images=%d recognized=%d placeholder=%d off=%d failed=%d oversize=%d" % (
         stats["images"], stats["recognized"], stats["placeholder"],
         stats["off"], stats["failed"], stats["oversize"]))
+    if stats.get("timeout"):
+        s += " timeout=%d" % stats["timeout"]
+    return s
+
+
+# 识别总超时（秒）：Ollama 僵死/极慢时放弃识别，防请求无限挂起。
+# 按档位给不同上限：fast 1 次调用、standard 2 次、deep 3-4 次。
+RECOGNIZE_TIMEOUT = {1: 45, 2: 60, 3: 120}
+
+
+def _mask_all_images(body: dict) -> int:
+    """把 body 里所有 image 块替换为占位文字（识别超时兜底）。
+    保证纯文本模型（DeepSeek）绝收不到 image 块——超时后线程可能还在跑，
+    这里主动把所有图换成占位，避免请求转发时残留 image 块导致上游报错。"""
+    cnt = 0
+    for msg in body.get("messages", []):
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        out = []
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "image":
+                out.append({"type": "text", "text": "[图片（识别超时，已省略）]"})
+                cnt += 1
+            else:
+                out.append(b)
+        msg["content"] = out
+    return cnt
 
 
 app = FastAPI()
@@ -241,14 +272,24 @@ async def messages(request: Request):
         try:
             # 用 to_thread 跑同步识别，避免阻塞事件循环（图片识别 10-30s，
             # 若不跑线程池，期间分类器透传等请求会全部排队——用户踩过的坑）。
-            body, changed, stats = await asyncio.to_thread(_convert_images, body)
+            # wait_for 兜底：Ollama 僵死/极慢时超时放弃识别（#13），防请求无限挂起。
+            lv = vision_level()
+            to = RECOGNIZE_TIMEOUT.get(lv, 60)
+            body, changed, stats = await asyncio.wait_for(
+                asyncio.to_thread(_convert_images, body), timeout=to)
+        except asyncio.TimeoutError:
+            masked = _mask_all_images(body)
+            stats = {"images": masked, "recognized": 0, "placeholder": 0,
+                     "off": 0, "failed": 0, "oversize": 0, "timeout": masked}
+            log.warning("req=%s convert TIMEOUT after %.0fs, masked %d image(s) → placeholder",
+                        rid, to, masked)
         except Exception as e:
             log.error("req=%s convert_error %s: %s duration=%.2fs",
                       rid, type(e).__name__, e, time.time() - t1, exc_info=True)
             stats = None  # 解析失败 → 原样转发
         else:
-            # 只有兜底路径（识别失败/超限/历史占位/off）才落盘，正常识别走 debug
-            if any(stats[k] for k in ("failed", "oversize", "placeholder", "off")):
+            # 只有兜底路径（识别失败/超限/历史占位/off/超时）才落盘，正常识别走 debug
+            if any(stats.get(k) for k in ("failed", "oversize", "placeholder", "off", "timeout")):
                 log.warning("req=%s convert %s duration=%.2fs", rid, _fmt_stats(stats), time.time() - t1)
             else:
                 log.debug("req=%s convert %s duration=%.2fs", rid, _fmt_stats(stats), time.time() - t1)
