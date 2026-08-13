@@ -15,3 +15,10 @@ identify_result.txt
 
 # 本地配置（含可能的敏感信息，不提交）
 # settings.json / .claude.json 在用户目录，不在本项目内
+
+# 本地敏感配置（含 API key，不提交）
+config.json
+config.local.json
+.env
+*.csv
+
