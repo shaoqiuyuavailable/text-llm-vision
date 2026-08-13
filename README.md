@@ -72,15 +72,54 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 实测 33 张跨类别语料：**大类准确率 91%，完全准确率（大类+小类）85%**。
 
-## 快速开始
+## 环境与部署
 
-### 前置
+### 前置环境
 
-- Ollama 已装，`qwen2.5vl` 已拉取（`ollama pull qwen2.5vl`）
-- Python 3.10+，`pip install fastapi uvicorn httpx`
-- Node ≥ 18
+| 依赖 | 版本 | 用途 |
+|------|------|------|
+| [Ollama](https://ollama.com) | ≥ 0.7（含 CUDA）| 本地视觉模型运行时 |
+| `qwen2.5vl` 模型 | 8.3B / Q4_K_M（约 6GB）| 视觉识别模型（Ollama 拉取）|
+| Python | ≥ 3.10 | 代理 + 识别脚本 |
+| Node.js | ≥ 18 | MCP server |
+| Claude Code | 最新 | 主运行环境 |
 
-### 1. 配置
+### 1. 安装 Ollama 并拉取视觉模型
+
+**Windows（winget）**：
+```bash
+winget install Ollama.Ollama
+```
+
+**模型存储重定向到非系统盘（可选但推荐）**——设置用户环境变量 `OLLAMA_MODELS`，然后重启 Ollama（任务栏退出再开）：
+```
+OLLAMA_MODELS = F:\ollama\models
+```
+
+**拉取视觉模型**：
+```bash
+ollama pull qwen2.5vl
+ollama list        # 确认就位
+```
+
+> 网络受限时：Ollama 模型走 `registry.ollama.ai`，一般直连可用；若失败，配好系统代理后重启 Ollama 重试。
+
+### 2. 安装 Python 依赖
+
+```bash
+pip install fastapi uvicorn httpx
+```
+
+> 若 `ollama pull` 或代理访问外网受限，需确保能访问 `registry.ollama.ai` / `api.deepseek.com`（必要时走本地代理，如 Clash `127.0.0.1:7897`）。
+
+### 3. 部署代码
+
+将项目放到运行目录（如 `~/.claude/vision-eyes/`）：
+
+```bash
+mkdir -p ~/.claude/vision-eyes
+# 拷贝本项目文件到该目录
+```
 
 复制 `config.json` 到 `~/.claude/vision-eyes/config.json`，按需调整：
 
@@ -95,26 +134,62 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 提示词缺失时回退到 `prompts.py` 内置默认（hybrid 模式）。
 
-### 2. 启动代理
+### 4. 启动代理
 
-```
+**手动启动**：
+```bash
+cd ~/.claude/vision-eyes
 python -m uvicorn proxy:app --port 8787
 ```
 
-设置 `ANTHROPIC_BASE_URL=http://localhost:8787`（可通过 CC Switch 或手动）。
+**自动启动（推荐）**：在 `~/.claude/settings.json` 配 SessionStart hook，Claude Code 启动时自动拉起代理：
 
-### 3. 注册 MCP
-
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command",
+        "command": "cmd /c \"C:\\Users\\<USERNAME>\\.claude\\vision-eyes\\start-proxy.bat\"" }] }
+    ]
+  }
+}
 ```
+
+> 本仓库 `start-proxy.bat` 做了幂等检查（端口已监听则不重复启动）。
+
+### 5. 指向代理
+
+设置 `ANTHROPIC_BASE_URL=http://localhost:8787`（可通过 CC Switch 或改 `~/.claude/settings.json` 的 env）：
+
+```json
+{ "env": { "ANTHROPIC_BASE_URL": "http://localhost:8787" } }
+```
+
+> 只有 DeepSeek（纯文本模型）需要指向代理；其它有视觉的模型用各自真实端点，不经过代理。
+
+### 6. 注册 MCP server
+
+```bash
 claude mcp add --scope user vision -e VISION_IDENTIFY_URL=http://127.0.0.1:8787 \
-  -- node "绝对路径/mcp-vision.js"
+  -- node "C:\Users\<USERNAME>\.claude\vision-eyes\mcp-vision.js"
 ```
 
-### 4. CLAUDE.md
+确认：`claude mcp list` 应显示 `vision ... ✔ Connected`。
 
-将「看图规范」写入 `~/.claude/CLAUDE.md`（见文末），引导模型用 `describe_image`。
+### 7. CLAUDE.md 引导
 
-### 5. 重启 Claude Code
+将「看图规范」（见文末附录）写入 `~/.claude/CLAUDE.md`，引导模型用 `describe_image` 而非 Read 图片。
+
+### 8. 视觉开关（可选）
+
+`/vision on|off` 斜杠命令切换。需在 `~/.claude/commands/vision.md` 放命令定义，并在 `permissions.allow` 加 `Bash(python *vision-eyes*toggle.py *)`。
+
+### 9. 重启 Claude Code
+
+所有配置就位后重启 Claude Code，验证：
+- 状态栏显示视觉状态（如配置 statusLine）
+- 粘贴图片 → 自动转文字
+- 让模型看本地图片 → 调用 `describe_image`
 
 ## 命令行工具
 
