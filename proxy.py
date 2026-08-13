@@ -128,30 +128,22 @@ async def _iter_upstream(resp, rid: str):
 MAX_IMAGES_PER_REQ = 3      # 每请求最多真识别的图片数
 MAX_IMAGE_B64 = 10 * 1024 * 1024 * 4 // 3  # 10MB 二进制对应的 base64 长度上限（约 13.98MB 字符）
 
-# 上游转发重试：DeepSeek 网络偶发连接错误 / 服务端明确失败才重试。
-# 连接类错误（ConnectError/ReadTimeout 等）保证没到服务端 → 可安全重试；
-# 500/502/503 服务端明确失败未扣费 → 可重试；
-# 504（网关超时）不重试——流式端点 504 可能已部分生成/处理，盲发会重复扣费+幻觉；
-# 4xx（业务错误）不重试。
+# 上游转发重试：只重试"连接断开"——连接类错误保证请求没到服务端，重试不会重复扣费。
+# 5xx（含 500/502/503/504）一律不重试：服务端可能已生成内容并扣费，盲发会双重扣费+幻觉。
+# 4xx（业务错误）也不重试。
 _RETRYABLE_ERR = (httpx.ConnectError, httpx.ReadError, httpx.ReadTimeout, httpx.ConnectTimeout,
                   httpx.RemoteProtocolError, httpx.WriteError)
-_RETRY_STATUS = {500, 502, 503}
 
 
 async def _send_with_retry(client, req, rid, tag: str, retries: int = 1):
-    """发送请求，连接错误/5xx 时重试 1 轮。返回 (resp, 是否重试过)。"""
+    """发送请求，仅连接断开时重试 1 轮。返回 (resp, 是否重试过)。"""
     for attempt in range(retries + 1):
         try:
             resp = await client.send(req, stream=True)
-            if resp.status_code in _RETRY_STATUS and attempt < retries:
-                log.warning("req=%s %s status=%d (retryable 5xx), attempt %d/%d",
-                            rid, tag, resp.status_code, attempt + 1, retries + 1)
-                await resp.aclose()
-                continue
             return resp, attempt > 0
         except _RETRYABLE_ERR as e:
             if attempt < retries:
-                log.warning("req=%s %s %s (retry), attempt %d/%d",
+                log.warning("req=%s %s %s (connection retry), attempt %d/%d",
                             rid, tag, type(e).__name__, attempt + 1, retries + 1)
                 continue
             raise
