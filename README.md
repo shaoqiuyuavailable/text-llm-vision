@@ -26,7 +26,7 @@
 |---|------|---------|
 | 1 | 无缝粘贴，无感知 | 代理 image→text，验证通过 |
 | 2 | 自动启动，开 Claude Code 即用 | SessionStart hook 拉起代理 |
-| 3 | 可开关，随时关视觉 | `/vision on\|off` + 状态栏 |
+| 3 | 可开关+可调档，随时切 | `/vision 0/1/2/3` + 状态栏显示档位 |
 | 4 | 分类稳定，结果收敛 | 温度分层（document 0.2 ~ guess 0.5）|
 | 5 | 敢猜，能提供推测 | guess 层（候选 + 置信度）|
 | 6 | 不破坏 auto 分类器 | 代理只转含图请求，其余（含分类器）原样透传 |
@@ -256,6 +256,10 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 
 `on`/`off` 向后兼容（on→1，off→0）。代理和 MCP 都读取该档位。
 
+**快速调节**：`/vision 0|1|2|3`（或 `/vision on|off`）；也可直接改 state 文件，下一请求生效，无需重启。
+
+**可视化**：配置 `statusLine` 指向 `status.bat`，状态栏实时显示当前档位（如 `[vision] fast (1)`）。改档位后状态栏自动更新。
+
 ## 已知限制
 
 1. **VS Code 扩展的 Read hook 绕过**（[upstream bug #37540](https://github.com/anthropics/claude-code/issues/37540)）：扩展的工具执行层绕过 PreToolUse hook，Read 图片 hook 不生效。因此「模型自主看图」走 **MCP describe_image**（不依赖 hook），而非 hook。**不要用 Read 读图片**（返回 `[Unsupported Image]`）。
@@ -278,7 +282,7 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `collect_images.py` | Wikimedia 类别语料采集 |
 | `mcp-vision.js` | MCP server：describe_image 工具 |
 | `toggle.py` | 视觉档位开关（写 state 0/1/2/3） |
-| `start-proxy.bat` / `status.bat` | 启动代理 / 状态栏 |
+| `start-proxy.bat` / `status.bat` | 启动代理 / 状态栏（显示档位）|
 | `test_proxy.py` | 代理端到端测试 |
 
 ## 附：CLAUDE.md 看图规范
