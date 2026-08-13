@@ -73,10 +73,12 @@
 ### 请求流转（粘贴图片）
 
 ```
-Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──▶ api.deepseek.com/anthropic
+Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──▶ [上游动态解析]
               ↳ 含 image 块 → 调本地 Ollama(Qwen2.5-VL) 转成文字
               ↳ 无 image 块 → 原样透传（含分类器等一切请求）
 ```
+
+> **上游解绑（不写死 DeepSeek）**：代理不再硬编码上游。转发前按**请求头 token 反查 CC Switch 数据库**（`providers.settings_config` 匹配 token → `provider_endpoints` 取非 localhost 的真实上游），**CC Switch 切换 provider 时自动跟随**；查不到则回退 `config.json` 的 `upstream`（默认 DeepSeek）。只有 base URL 指向本代理的纯文本模型走代理，切走即绕过。
 
 > **长会话历史图处理**：同一请求里的 messages 可能包含多轮旧图（长对话每次都带全量历史）。代理只对**最后一条含图的 user 消息**做真识别（当前轮新增），更早的旧图统一替换为 `[历史图片已省略]` 占位——**旧图不消耗每请求 3 张的识别配额**。这样既保证纯文本模型收不到 image 块（防 ReadError），又避免长会话被历史图反复重识别拖慢/挤占当前图。
 
