@@ -220,7 +220,7 @@ mkdir -p ~/.claude/vision-eyes
 
 ### 4. 启动代理
 
-代理端口由 `config.json` 的 `port` 字段决定（默认 `8787`）。切换端口：`vision port <N>`（或 `python toggle.py port <N>`），会写 config.json 并提示同步 CC Switch / MCP / settings 三处（见「已知限制」第 14 条）。
+代理端口由 `config.json` 的 `port` 字段决定（默认 `8787`）。切换端口：`vision local <N>`（端口唯一入口，`vision port` 子命令已并入 `local`），会写 config.json 并提示同步 CC Switch / MCP / settings 三处（见「已知限制」第 14 条）。
 
 **手动启动**：
 ```bash
@@ -324,6 +324,20 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 
 **快速调节**：`/vision 0|1|2|3`（或 `/vision on|off`）；也可直接改 state 文件，下一请求生效，无需重启。
 
+### 后端切换（本地 / 云端）
+
+档位（0-3）控制**识别精度**，后端控制**识别引擎**——**两条独立轴，互不影响、可叠加**：
+
+```bash
+/vision local              # 切本地 Ollama（端口保持当前）
+/vision local 9000         # 切本地 + 指定端口（端口唯一入口，`vision port` 子命令已并入）
+/vision cloud              # 切云端（当前或第一个厂商）
+/vision cloud siliconflow  # 切云端 + 指定厂商
+/vision list               # 查看档位/后端/端口/各厂商 key
+```
+
+**逻辑隔离**：`local` 只写 `cloud.active=""`（+ 可选端口），**不碰**云端厂商列表；`cloud` 只写 `active=<厂商>`，**不碰**端口；档位命令不碰后端。`active` 指向不存在厂商时安全回退本地。云端 key 从环境变量 `<厂商大写>_API_KEY` 或 config `api_key` 读（见「视觉后端」章节）。
+
 **可视化**：配置 `statusLine` 指向 `status.bat`，状态栏实时显示当前档位（如 `[vision] fast (1)`）。改档位后状态栏自动更新。
 
 ## 已知限制
@@ -341,7 +355,7 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 11. **依赖缺失兜底（#5）**：`start-proxy.bat` 启动前预检 `python` + `uvicorn/fastapi/httpx`，失败给出明确提示；启动后用 `/health` 验活（而非只看端口），端口占用但无响应时告警。state/config 回退（#15/#16）不再静默——损坏时记 warning 落日志。
 12. **假死探测（#2）**：事件循环卡死时 HTTP 层不响应但端口仍监听（`/health` 测不出）。代理内置 **watchdog 守护线程**：每 30s 请求自身 `/health`，连续 3 次失败判假死 → 记 ERROR + `os._exit(1)` 自杀，下次 SessionStart 的 start-proxy.bat 自动拉起新进程。仅在 uvicorn 运行时启用（lifespan 启动），import/测试不触发。
 13. **上游断流日志（#10）**：SSE 流式转发中上游中途断流（ReadError/ConnectError）时，`_iter_upstream` 包装生成器记 `WARNING upstream stream interrupted mid-way` + 请求 ID。正常完成 / 客户端主动断开不记录（不算异常）。
-14. **端口可配置（#4）**：代理端口由 `config.json` 的 `port` 字段决定（默认 8787）。切换命令：`vision port <N>`（或 `python toggle.py port <N>`），会写 config.json 并**提示同步三处**：CC Switch 里 DeepSeek 的 Base URL、MCP 注册的 `VISION_IDENTIFY_URL`、settings.json 的 `ANTHROPIC_BASE_URL`。改端口后需重启会话（SessionStart 会在新端口自动拉起代理）。
+14. **端口可配置（#4）**：代理端口由 `config.json` 的 `port` 字段决定（默认 8787）。切换命令：`vision local <N>`（端口唯一入口，已并入 `local` 子命令），会写 config.json 并**提示同步三处**：CC Switch 里 DeepSeek 的 Base URL、MCP 注册的 `VISION_IDENTIFY_URL`、settings.json 的 `ANTHROPIC_BASE_URL`。改端口后需重启会话（SessionStart 会在新端口自动拉起代理）。
 15. **上游重试策略（防重复扣费）**：代理**只重试连接断开类错误**（`ConnectError`/`ReadError`/`ReadTimeout` 等——这些保证请求未达服务端，重试不会重复扣费）。**5xx 一律不重试**（500/502/503/504）：服务端可能已生成内容并扣费，盲发会**双重扣费 + 幻觉**（曾因此额外扣费）。4xx 业务错误也不重试。所有非 2xx 直接透传给 Claude Code 处理。
 
 ## 文件清单
@@ -358,7 +372,7 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `scan_one.py` | 单图 scan JSON 输出 |
 | `collect_images.py` | Wikimedia 类别语料采集 |
 | `mcp-vision.js` | MCP server：describe_image 工具 |
-| `toggle.py` | 视觉档位开关（写 state 0/1/2/3）+ `port` 子命令切换端口 |
+| `toggle.py` | 视觉控制：档位 0/1/2/3 + 后端 local[端口]/cloud[厂商]/list |
 | `start-proxy.bat` / `start_proxy.py` | 启动代理（bat 薄壳，逻辑全在 Python：读端口/验活/拉起）|
 | `read_port.py` | 输出配置端口（供 bat/脚本用） |
 | `status.bat` | 状态栏（显示档位）|
