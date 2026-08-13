@@ -37,6 +37,9 @@ def _defaults() -> dict:
             "temperature": _prompts.TEMPERATURE,
             "top_p": _prompts.TOP_P,
         },
+        # 可选云端通道：配了 api_key 就走云端（OpenAI 兼容），否则纯本地 Ollama。
+        # 保留"默认零配置纯本地"的定位，云端是手动开关。
+        "cloud": {"base_url": "", "api_key": "", "model": ""},
         "scenes": {k: dict(v) for k, v in getattr(_prompts, "SCENES", {}).items()},
         "prompts": {k: dict(v) for k, v in _prompts.PROMPTS.items()},
     }
@@ -67,6 +70,8 @@ def get() -> dict:
         if isinstance(data, dict):
             if "port" in data:
                 cfg["port"] = data["port"]
+            if isinstance(data.get("cloud"), dict):
+                cfg["cloud"].update(data["cloud"])
             if isinstance(data.get("ollama"), dict):
                 cfg["ollama"].update(data["ollama"])
             if isinstance(data.get("scenes"), dict):
