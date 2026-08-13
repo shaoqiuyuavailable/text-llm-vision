@@ -104,6 +104,30 @@ def describe(path_or_b64: str, prompt: str = "") -> str:
     return _post_b64(_to_b64(path_or_b64), prompt, temp)
 
 
+def _image_size(path: str) -> str:
+    """读图片尺寸（宽x高）。用于 grounding 输出里附原始尺寸，供主模型换算空间关系。"""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            w, h = im.size
+            return f"{w}x{h}"
+    except Exception:
+        return ""
+
+
+def spatial(path_or_b64: str) -> str:
+    """空间结构识别（grounding）：输出元素名 + bbox 坐标 + 图片尺寸。
+    解决散文描述丢失空间坐标/拓扑的问题——主模型基于结构化坐标推理布局，
+    而非脑补。bbox 为模型内部网格坐标，配合原图尺寸由主模型换算相对位置。"""
+    e = _entry("spatial")
+    img_path = path_or_b64 if os.path.exists(path_or_b64) else ""
+    size = _image_size(img_path) if img_path else ""
+    text = _post_b64(_to_b64(path_or_b64), e["text"], e["temperature"])
+    if size:
+        text += f"\n【原图尺寸】{size}"
+    return text
+
+
 def analyze(path_or_b64: str, precision: str = "") -> str:
     """按精度档位识别。统一入口，供 proxy / MCP 使用。
     - fast:     1 次 describe（单句描述）——快
@@ -122,9 +146,16 @@ def analyze(path_or_b64: str, precision: str = "") -> str:
     facts = zoom(path_or_b64, scene, sub=sub, scan_desc=desc)
     if precision == "standard":
         return f"【初步判断】{desc}\n【场景】{scene}\n【细节】\n{facts}"
-    # deep：再加 guess
+    # deep：再加 guess + 空间结构（grounding bbox）
     guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc)
-    return f"【初步判断】{desc}\n【场景】{scene}\n【细节】\n{facts}\n\n【推测】\n{guess_out}"
+    try:
+        spatial_out = spatial(path_or_b64)
+    except Exception:
+        spatial_out = ""  # grounding 失败不影响主体
+    base = f"【初步判断】{desc}\n【场景】{scene}\n【细节】\n{facts}\n\n【推测】\n{guess_out}"
+    if spatial_out:
+        base += f"\n\n【空间结构】\n{spatial_out}"
+    return base
 
 
 def scan(path_or_b64: str) -> tuple[str, str, str]:
