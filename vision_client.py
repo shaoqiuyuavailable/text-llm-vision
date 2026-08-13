@@ -56,7 +56,7 @@ def _post_b64(b64: str, prompt: str, temperature: float) -> str:
     r = httpx.post(o["url"], json={"model": o["model"], "prompt": prompt, "images": [b64],
                                    "stream": False, "options": {"temperature": temperature,
                                                                 "top_p": o["top_p"]}},
-                   timeout=300, trust_env=False)
+                   timeout=120, trust_env=False)
     r.raise_for_status()
     text = r.json()["response"].strip()
     with _cache_lock:
