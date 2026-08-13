@@ -1,4 +1,5 @@
 {
+  "port": 8787,
   "ollama": {
     "url": "http://localhost:11434/api/generate",
     "model": "qwen2.5vl",
@@ -12,7 +13,11 @@
   },
   "scenes": {
     "person": {
-      "sub": ["anime", "real", "group"],
+      "sub": [
+        "anime",
+        "real",
+        "group"
+      ],
       "default_sub": "anime"
     },
     "animal": {
@@ -20,7 +25,13 @@
       "default_sub": ""
     },
     "document": {
-      "sub": ["chat", "report", "code", "form", "table"],
+      "sub": [
+        "chat",
+        "report",
+        "code",
+        "form",
+        "table"
+      ],
       "default_sub": "report"
     },
     "chart": {
@@ -28,7 +39,11 @@
       "default_sub": ""
     },
     "generic": {
-      "sub": ["screenshot", "landscape", "object"],
+      "sub": [
+        "screenshot",
+        "landscape",
+        "object"
+      ],
       "default_sub": "screenshot"
     }
   },

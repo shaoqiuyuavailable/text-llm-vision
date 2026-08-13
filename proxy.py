@@ -13,6 +13,7 @@ import vision_client
 # 其它一切请求（含分类器）原样透传，绝不影响转发。
 UPSTREAM = "https://api.deepseek.com/anthropic"
 STATE = os.path.expanduser("~/.claude/vision-eyes/state")
+PORT = config_loader.get_port()  # 监听端口：config.json 的 port（默认 8787），改端口需同步 CC Switch base URL
 PROXY_VERSION = "0.4.0"
 LOG_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(LOG_DIR, "vision-proxy.log")
@@ -257,7 +258,7 @@ def _mask_all_images(body: dict) -> int:
 # 只在 uvicorn 真正跑服务器时启用（lifespan 启动），import/测试不触发。
 WATCHDOG_INTERVAL = 30      # 秒
 WATCHDOG_FAIL_LIMIT = 3     # 连续失败多少次判假死
-WATCHDOG_SELF_URL = "http://127.0.0.1:8787/health"
+WATCHDOG_SELF_URL = f"http://127.0.0.1:{PORT}/health"
 _watchdog_stop = threading.Event()
 
 

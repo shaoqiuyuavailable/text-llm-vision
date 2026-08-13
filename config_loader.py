@@ -24,11 +24,13 @@ import os
 import prompts as _prompts
 
 CONFIG_PATH = os.path.expanduser("~/.claude/vision-eyes/config.json")
+DEFAULT_PORT = 8787  # 代理默认监听端口（config.json 的 port 可覆盖）
 log = logging.getLogger("vision_proxy")  # 与 proxy.py 同 logger，写同一日志文件
 
 
 def _defaults() -> dict:
     return {
+        "port": DEFAULT_PORT,  # 代理监听端口（config.json 可覆盖）
         "ollama": {
             "url": _prompts.OLLAMA,
             "model": _prompts.VISION_MODEL,
@@ -38,6 +40,14 @@ def _defaults() -> dict:
         "scenes": {k: dict(v) for k, v in getattr(_prompts, "SCENES", {}).items()},
         "prompts": {k: dict(v) for k, v in _prompts.PROMPTS.items()},
     }
+
+
+def get_port() -> int:
+    """代理监听端口（config.json 的 port，缺失/非法回退默认 8787）。"""
+    try:
+        return int(get().get("port", DEFAULT_PORT))
+    except (TypeError, ValueError):
+        return DEFAULT_PORT
 
 
 def _normalize_entry(entry) -> dict:
@@ -55,6 +65,8 @@ def get() -> dict:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
+            if "port" in data:
+                cfg["port"] = data["port"]
             if isinstance(data.get("ollama"), dict):
                 cfg["ollama"].update(data["ollama"])
             if isinstance(data.get("scenes"), dict):

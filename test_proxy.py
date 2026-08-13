@@ -1,13 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""独立测试本地视觉代理，不修改 settings.json，直接请求 localhost:8787。
+"""独立测试本地视觉代理，不修改 settings.json，直接请求代理端口（从 config.json 读）。
 
-用前确保：1) 代理已启动 (uvicorn proxy:app --port 8787)；2) Ollama 在跑且 qwen2.5vl 已拉取。
+用前确保：1) 代理已启动 (uvicorn proxy:app --port <config port>)；2) Ollama 在跑且 qwen2.5vl 已拉取。
 运行：python test_proxy.py
 """
 import base64, io, json, os, sys, urllib.request, urllib.error
 
-PROXY = "http://localhost:8787/v1/messages"
+import config_loader
+
+_PROXY_PORT = config_loader.get_port()
+PROXY = f"http://localhost:{_PROXY_PORT}/v1/messages"
 STATE = os.path.expanduser("~/.claude/vision-eyes/state")
 
 
