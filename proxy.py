@@ -1,4 +1,5 @@
-import asyncio, os, time, uuid, logging, httpx
+import asyncio, os, threading, time, uuid, logging, httpx
+from contextlib import asynccontextmanager
 from logging.handlers import TimedRotatingFileHandler
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -95,17 +96,32 @@ def fwd_headers(request: Request) -> dict:
     return {k: v for k, v in request.headers.items() if k.lower() not in _HOP}
 
 
-def _forward(resp, client) -> StreamingResponse:
+def _forward(resp, client, rid: str = "") -> StreamingResponse:
     headers = {
         k: v for k, v in resp.headers.items()
         if k.lower() not in ("content-length", "transfer-encoding", "connection", "content-encoding")
     }
     return StreamingResponse(
-        resp.aiter_bytes(),
+        _iter_upstream(resp, rid),  # 包装生成器：上游中途断流记日志（#10）
         status_code=resp.status_code,
         headers=headers,
         background=BackgroundTask(client.aclose),  # 流式结束后关 client
     )
+
+
+async def _iter_upstream(resp, rid: str):
+    """迭代上游响应体；流式转发中途上游断流（ReadError/ConnectError 等）时记日志。
+
+    正常完成 / 客户端主动断开（CancelledError）不算异常；只有上游在流中途抛错才记。"""
+    try:
+        async for chunk in resp.aiter_bytes():
+            yield chunk
+    except asyncio.CancelledError:
+        raise  # 客户端断开：正常，不记录
+    except Exception as e:
+        log.warning("req=%s upstream stream interrupted mid-way: %s: %s",
+                    rid, type(e).__name__, e, exc_info=True)
+        raise  # 继续抛给 StreamingResponse 正常结束该连接
 
 
 MAX_IMAGES_PER_REQ = 3      # 每请求最多真识别的图片数
@@ -234,7 +250,46 @@ def _mask_all_images(body: dict) -> int:
     return cnt
 
 
-app = FastAPI()
+# ---------------- 假死探测 watchdog（#2） ----------------
+# 事件循环卡死时 HTTP 层不响应，但进程还在、端口还监听——SessionStart 的 bat 只查端口
+# 验不出这种"假死"。这里用一个守护线程周期请求自身 /health，连续失败则判定假死：
+# 记 ERROR 后主动退出进程，让下次 SessionStart 的 start-proxy.bat 自动拉起新进程。
+# 只在 uvicorn 真正跑服务器时启用（lifespan 启动），import/测试不触发。
+WATCHDOG_INTERVAL = 30      # 秒
+WATCHDOG_FAIL_LIMIT = 3     # 连续失败多少次判假死
+WATCHDOG_SELF_URL = "http://127.0.0.1:8787/health"
+_watchdog_stop = threading.Event()
+
+
+def _watchdog_loop():
+    fails = 0
+    while not _watchdog_stop.wait(WATCHDOG_INTERVAL):
+        try:
+            r = httpx.get(WATCHDOG_SELF_URL, timeout=5, trust_env=False)
+            ok = r.status_code == 200
+        except Exception:
+            ok = False
+        if ok:
+            if fails:
+                log.info("watchdog: /health recovered after %d failure(s)", fails)
+            fails = 0
+        else:
+            fails += 1
+            log.warning("watchdog: /health check failed %d/%d consecutive", fails, WATCHDOG_FAIL_LIMIT)
+            if fails >= WATCHDOG_FAIL_LIMIT:
+                log.error("watchdog: proxy appears FROZEN (%d consecutive /health failures). "
+                          "Exiting process for auto-restart on next session.", WATCHDOG_FAIL_LIMIT)
+                os._exit(1)  # 自杀 → start-proxy.bat 下次自动拉起
+
+
+@asynccontextmanager
+async def _lifespan(app):
+    threading.Thread(target=_watchdog_loop, daemon=True, name="watchdog").start()
+    yield
+    _watchdog_stop.set()
+
+
+app = FastAPI(lifespan=_lifespan)
 
 
 @app.get("/health")
@@ -309,7 +364,7 @@ async def messages(request: Request):
     else:
         log.debug("req=%s upstream status=%d duration=%.2fs", rid, resp.status_code, time.time() - t2)
     log.debug("req=%s done total=%.2fs", rid, time.time() - t0)
-    return _forward(resp, client)
+    return _forward(resp, client, rid)
 
 
 @app.post("/identify")
@@ -382,7 +437,7 @@ async def passthrough(request: Request, path: str):
     else:
         log.debug("req=%s passthrough %s /%s status=%d duration=%.2fs",
                   rid, request.method, path, resp.status_code, time.time() - t0)
-    return _forward(resp, client)
+    return _forward(resp, client, rid)
 
 
 log.info("proxy v%s loaded pid=%d level=%d log=%s", PROXY_VERSION, os.getpid(), vision_level(), LOG_FILE)
