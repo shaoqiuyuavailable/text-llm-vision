@@ -1,12 +1,12 @@
-# visual-ds：给纯文本模型装上「本地视觉眼睛」
+# text-llm-vision：给纯文本模型装上「本地视觉眼睛」
 
-**让没有视觉的纯文本 LLM（DeepSeek、GLM 等）在 Claude Code 里真正"看得见"**——图片进去，文字描述出来，模型基于描述正常推理。全程本地、零 API 费用、数据不出机器。
+**让没有视觉的纯文本 LLM（DeepSeek、Qwen、Kimi、GLM 等）在 Claude Code 里真正"看得见"**——图片进去，文字描述出来，模型基于描述正常推理。全程本地、零 API 费用、数据不出机器。
 
 > **一句话定位**：不是一个简单的"视觉代理"，而是一个 **本地视觉增强引擎**——专为"纯文本模型 + 终端/IDE"场景设计，用 **MCP + 代理 + 软规则三层互补架构** + **Scan/Zoom/Guess 三次判定流水线**，把 8B 小模型的视觉潜力榨到极致，同时做到开箱即用的深度集成。
 
 参考了 [glm-vision](https://github.com/shiss3/glm-vision) 的「MCP + 代理 + 软规则」三层互补架构，视觉后端落在本地 Ollama + Qwen2.5-VL。
 
-> **English / Keywords**: A **local vision proxy** for text-only LLMs (DeepSeek, GLM). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), and **CLAUDE.md soft rules**. Vision backend: **Ollama + Qwen2.5-VL** with a **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, deep **Claude Code** integration (vision level toggling, status bar, auto-start). Similar projects: glm-vision, ds-vision-skill-plus.
+> **English / Keywords**: A **local vision proxy** for text-only LLMs (DeepSeek, Qwen, Kimi, GLM). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), and **CLAUDE.md soft rules**. Vision backend: **Ollama + Qwen2.5-VL** with a **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, deep **Claude Code** integration (vision level toggling, status bar, auto-start). Upstream dynamically resolved by CC Switch token — switch model and the proxy follows. Similar projects: glm-vision, ds-vision-skill-plus.
 
 ## 四大差异化卖点
 
@@ -78,7 +78,7 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
               ↳ 无 image 块 → 原样透传（含分类器等一切请求）
 ```
 
-> **上游解绑（不写死 DeepSeek）**：代理不再硬编码上游。转发前按**请求头 token 反查 CC Switch 数据库**（`providers.settings_config` 匹配 token → `provider_endpoints` 取非 localhost 的真实上游），**CC Switch 切换 provider 时自动跟随**；查不到则回退 `config.json` 的 `upstream`（默认 DeepSeek）。只有 base URL 指向本代理的纯文本模型走代理，切走即绕过。
+> **上游解绑（不写死 DeepSeek）**：代理不再硬编码上游。转发前按**请求头 token 反查 CC Switch 数据库**（`providers.settings_config` 匹配 token → `provider_endpoints` 取非 localhost 的真实上游），**CC Switch 切换 provider 时自动跟随**；查不到则回退 `config.json` 的 `upstream`（默认 DeepSeek）。只有 base URL 指向本代理的纯文本模型走代理，切走即绕过。**已实测兼容的上游模型：DeepSeek、Qwen、Kimi**（CC Switch 切换后贴图识别正常，代理自动跟随 token 定位各自真实上游）。
 
 > **长会话历史图处理**：同一请求里的 messages 可能包含多轮旧图（长对话每次都带全量历史）。代理只对**最后一条含图的 user 消息**做真识别（当前轮新增），更早的旧图统一替换为 `[历史图片已省略]` 占位——**旧图不消耗每请求 3 张的识别配额**。这样既保证纯文本模型收不到 image 块（防 ReadError），又避免长会话被历史图反复重识别拖慢/挤占当前图。
 
@@ -274,7 +274,7 @@ python -m uvicorn proxy:app --port $(python read_port.py)
 > 2. 出问题时，**手动改回直连 + 重启 Claude Code**（会话启动时加载 env，中途改不生效）
 > 3. 或临时关掉代理（代理挂时请求走不通，直连是逃生通道）
 >
-> 只有 DeepSeek（纯文本模型）需要指向代理；其它有视觉的模型用各自真实端点，不经过代理。
+> 只有纯文本模型（DeepSeek / Qwen / Kimi 等）需要指向代理；其它有视觉的模型用各自真实端点，不经过代理。
 
 ### 6. 注册 MCP server
 
@@ -369,8 +369,10 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 11. **依赖缺失兜底（#5）**：`start-proxy.bat` 启动前预检 `python` + `uvicorn/fastapi/httpx`，失败给出明确提示；启动后用 `/health` 验活（而非只看端口），端口占用但无响应时告警。state/config 回退（#15/#16）不再静默——损坏时记 warning 落日志。
 12. **假死探测（#2）**：事件循环卡死时 HTTP 层不响应但端口仍监听（`/health` 测不出）。代理内置 **watchdog 守护线程**：每 30s 请求自身 `/health`，连续 3 次失败判假死 → 记 ERROR + `os._exit(1)` 自杀，下次 SessionStart 的 start-proxy.bat 自动拉起新进程。仅在 uvicorn 运行时启用（lifespan 启动），import/测试不触发。
 13. **上游断流日志（#10）**：SSE 流式转发中上游中途断流（ReadError/ConnectError）时，`_iter_upstream` 包装生成器记 `WARNING upstream stream interrupted mid-way` + 请求 ID。正常完成 / 客户端主动断开不记录（不算异常）。
-14. **端口可配置（#4）**：代理端口由 `config.json` 的 `port` 字段决定（默认 8787）。切换命令：`vision local <N>`（端口唯一入口，已并入 `local` 子命令），会写 config.json 并**提示同步三处**：CC Switch 里 DeepSeek 的 Base URL、MCP 注册的 `VISION_IDENTIFY_URL`、settings.json 的 `ANTHROPIC_BASE_URL`。改端口后需重启会话（SessionStart 会在新端口自动拉起代理）。
+14. **端口可配置（#4）**：代理端口由 `config.json` 的 `port` 字段决定（默认 8787）。切换命令：`vision local <N>`（端口唯一入口，已并入 `local` 子命令），会写 config.json 并**提示同步三处**：CC Switch 里纯文本模型 provider 的 Base URL、MCP 注册的 `VISION_IDENTIFY_URL`、settings.json 的 `ANTHROPIC_BASE_URL`。改端口后需重启会话（SessionStart 会在新端口自动拉起代理）。
 15. **上游重试策略（防重复扣费）**：代理**只重试连接断开类错误**（`ConnectError`/`ReadError`/`ReadTimeout` 等——这些保证请求未达服务端，重试不会重复扣费）。**5xx 一律不重试**（500/502/503/504）：服务端可能已生成内容并扣费，盲发会**双重扣费 + 幻觉**（曾因此额外扣费）。4xx 业务错误也不重试。所有非 2xx 直接透传给 Claude Code 处理。
+16. **粘贴图片全自动（非手动）**：对比 CC-Vision 等「hook 扫描 image-cache 注入」方案，本方案的粘贴场景已由**代理层全自动覆盖**——VS Code 扩展粘贴 → image block 直接进请求 → 代理 `_convert_images` 自动转文字，**零手动触发**（实测：本会话粘贴图被代理自动拦截转文字）。真正需要「手动调用 MCP describe_image」的只有**模型自主读图**（Read 图片路径），那是第 1 条 #37540 的环境盲区，非设计缺陷。
+17. **Windows 剪贴板兼容性（无需第三方）**：代理方案**不扫描剪贴板、不依赖 `image-cache` 落盘**，只要图片进请求体即拦截，天然跨平台。Windows 下 `Alt+V` 原生粘贴图片（[#18590](https://github.com/anthropics/claude-code/issues/18590) 官方确认非 bug）→ 代理照常识别，**无需 WSL / winclipshot 等第三方**。需第三方兜底的只是 Claude Code 自身 v2.1.140 回归（[#58658](https://github.com/anthropics/claude-code/issues/58658)：Windows 绝对路径粘贴不再附加为图片）。**CC-Vision 的 UserPromptSubmit hook 方案在本环境无效**：实测 VS Code 扩展粘贴**不落盘** `~/.claude/image-cache/`（本会话粘贴过图但目录不存在），hook 会静默空转——image-cache 是终端 CLI 专属落盘机制（官方 `imageStore.ts`）。
 
 ## 文件清单
 
