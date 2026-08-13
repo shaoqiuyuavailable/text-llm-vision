@@ -15,6 +15,7 @@ OLLAMA = "http://localhost:11434/api/generate"
 VISION_MODEL = "qwen2.5vl"
 TEMPERATURE = 0.5
 TOP_P = 0.8
+PRECISION = "fast"  # fast | standard | deep（识别精度档位）
 
 SCENES = {
     "person": {"sub": ["anime", "real", "group"], "default_sub": "anime"},

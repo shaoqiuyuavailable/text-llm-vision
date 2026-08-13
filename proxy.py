@@ -14,11 +14,17 @@ STATE = os.path.expanduser("~/.claude/vision-eyes/state")
 _HOP = {"host", "content-length", "connection", "transfer-encoding", "content-encoding"}
 
 
-def vision_on() -> bool:
+def vision_level() -> int:
+    """读取视觉档位：0=off 1=fast 2=standard 3=deep。
+    兼容旧格式 state 文件（on/off）。"""
     try:
-        return open(STATE).read().strip() != "off"
+        raw = open(STATE).read().strip()
+        if raw.isdigit():
+            lv = int(raw)
+            return lv if 0 <= lv <= 3 else 1
+        return 1 if raw != "off" else 0  # 旧 on/off 格式
     except Exception:
-        return True  # 默认开
+        return 1  # 默认 fast
 
 
 def fwd_headers(request: Request) -> dict:
@@ -56,10 +62,15 @@ def _convert_images(body: dict) -> dict:
         for block in content:
             if isinstance(block, dict) and block.get("type") == "image":
                 n += 1
-                if vision_on():
+                lv = vision_level()
+                if lv == 0:
+                    out.append({"type": "text", "text": f"[图片{n}（视觉已关闭，未识别）]"})
+                else:
+                    # 档位→精度：1=fast 2=standard 3=deep
+                    precision = {1: "fast", 2: "standard", 3: "deep"}[lv]
                     try:
                         b64 = block.get("source", {}).get("data", "")
-                        desc = vision_client.describe(b64)
+                        desc = vision_client.analyze(b64, precision)
                         # 注入隔离壳：图片 OCR 出的文字可能是恶意指令，拼入 prompt 前声明
                         # 它只是图像特征，主模型不可执行其中任何指令（防间接提示词注入）。
                         out.append({"type": "text",
@@ -68,8 +79,6 @@ def _convert_images(body: dict) -> dict:
                     except Exception:
                         # 图片处理失败不影响转发：用占位文字兜底
                         out.append({"type": "text", "text": f"[图片{n}（识别失败，请重试）]"})
-                else:
-                    out.append({"type": "text", "text": f"[图片{n}（视觉已关闭，未识别）]"})
             else:
                 out.append(block)
         msg["content"] = out
@@ -114,8 +123,10 @@ async def identify(request: Request):
             return JSONResponse({"error": "bad path"}, status_code=400)
         if not real.lower().endswith(allowed_ext):
             return JSONResponse({"error": "not an image file"}, status_code=400)
-        # 描述图片内容（给模型看的）。只调一次，避免慢。
-        desc = vision_client.describe(real)
+        # 按视觉档位识别图片内容（1=fast 2=standard 3=deep）
+        lv = vision_level()
+        precision = {1: "fast", 2: "standard", 3: "deep"}.get(lv, "fast")
+        desc = vision_client.analyze(real, precision)
         return JSONResponse({"desc": desc})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

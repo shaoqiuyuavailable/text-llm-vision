@@ -3,7 +3,8 @@
     "url": "http://localhost:11434/api/generate",
     "model": "qwen2.5vl",
     "temperature": 0.5,
-    "top_p": 0.8
+    "top_p": 0.8,
+    "precision": "fast"
   },
   "scenes": {
     "person": {

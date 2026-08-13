@@ -104,6 +104,29 @@ def describe(path_or_b64: str, prompt: str = "") -> str:
     return _post_b64(_to_b64(path_or_b64), prompt, temp)
 
 
+def analyze(path_or_b64: str, precision: str = "") -> str:
+    """按精度档位识别。统一入口，供 proxy / MCP 使用。
+    - fast:     1 次 describe（单句描述）——快
+    - standard: 2 次 scan + zoom（描述 + 按场景提取事实）
+    - deep:     3 次 scan + zoom + guess（完整三次判定，含推测）
+    precision 缺省时读 config.prompts.default（或 config ollama.precision）。
+    """
+    cfg = config_loader.get()
+    if not precision:
+        precision = cfg.get("ollama", {}).get("precision", "fast")
+    precision = (precision or "fast").lower()
+    if precision == "fast":
+        return describe(path_or_b64)
+    # standard / deep：先 scan 判场景，再 zoom
+    desc, scene, sub = scan(path_or_b64)
+    facts = zoom(path_or_b64, scene, sub=sub, scan_desc=desc)
+    if precision == "standard":
+        return f"【初步判断】{desc}\n【场景】{scene}\n【细节】\n{facts}"
+    # deep：再加 guess
+    guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc)
+    return f"【初步判断】{desc}\n【场景】{scene}\n【细节】\n{facts}\n\n【推测】\n{guess_out}"
+
+
 def scan(path_or_b64: str) -> tuple[str, str, str]:
     """第1次：一句话描述 + 判断大类+小类。返回 (描述, 大类, 小类)。"""
     e = _entry("scan")
