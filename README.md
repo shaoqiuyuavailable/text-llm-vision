@@ -351,6 +351,21 @@ python scan_one.py <图片路径>             # JSON 输出（供脚本/代理�
 python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集语料
 ```
 
+## VS Code 可视化插件（动态展示 + 修改配置）
+
+侧边栏插件，在 Claude Code for VS Code 里**可视化调节**配置，不再只靠 `/vision` 文本命令。复用代理新增的**控制 API**（`/api/*`，内部复用 `control_api.py` → `toggle`/`config_loader`），插件只是薄 UI，不碰识别逻辑。
+
+| 控制台区域 | 操作 | 底层调用 |
+|---|---|---|
+| 健康横幅 | 代理 pid/版本/uptime；未运行时一键「启动代理」 | `GET /api/status` |
+| 档位 | 0/1/2/3 一键切换（off 自动释放显存） | `POST /api/level` |
+| 后端 | 本地 / 云端 + 厂商下拉 | `POST /api/backend` |
+| 端口 | 输入应用（改后提示需重启） | `POST /api/backend` |
+| 识别参数 | 温度 / top_p / 上游（白名单键） | `POST /api/config` |
+| 状态 | ollama 服务 + 云端厂商 key 状态 | `GET /api/status` |
+
+面板每 5s 自动轮询。**安装**：`vscode-ext/` 下 `F5` 调试开发，或 `bash scripts/package.sh` 打包 `.vsix` 安装（详见 `vscode-ext/README.md`）。
+
 ## 视觉档位
 
 `/vision <档位>` 控制「识别不识别 + 精度」，状态存 `~/.claude/vision-eyes/state`（`0/1/2/3`）：
@@ -404,7 +419,8 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 
 | 文件 | 作用 |
 |------|------|
-| `proxy.py` | 反向代理：image→text 转换 + 透传 + 整体日志 + /health 验活 |
+| `proxy.py` | 反向代理：image→text 转换 + 透传 + 整体日志 + /health 验活 + /api/* 控制端点 |
+| `control_api.py` | 控制 API 纯逻辑：get_status/set_level/set_backend/set_config（复用 toggle+config_loader） |
 | `vision_client.py` | 视觉识别客户端：scan/zoom/guess 三次判定 + 云端通道 + OCR 自动路由 |
 | `config_loader.py` | 读 config.json，缺失回退 prompts.py |
 | `config.json` | 场景/提示词/温度配置（唯一来源） |
@@ -416,6 +432,7 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `mcp-vision.js` | MCP server：describe_image 工具 |
 | `toggle.py` | 视觉控制：档位 0/1/2/3 + 后端 local[端口]/cloud[厂商]/list/doctor |
 | `install.py` | 一键部署：环境检测 + 自动配置（MCP/hook/CLAUDE.md/权限）+ 启动代理 + BASE_URL 备份回退 |
+| `vscode-ext/` | VS Code 可视化插件：侧边栏展示/修改配置（webview + extension.js + 打包脚本） |
 | `start-proxy.bat` / `start_proxy.py` | 启动代理（bat 薄壳，逻辑全在 Python：读端口/验活/拉起）|
 | `read_port.py` | 输出配置端口（供 bat/脚本用） |
 | `status.bat` | 状态栏（显示档位）|

@@ -1,0 +1,73 @@
+{
+  "name": "text-llm-vision",
+  "displayName": "text-llm-vision",
+  "description": "text-llm-vision 可视化控制台：动态展示并修改档位/后端/端口/温度/上游配置",
+  "version": "0.1.0",
+  "publisher": "shaoqiuyuavailable",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaoqiuyuavailable/text-llm-vision.git"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:vision.view"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vision",
+          "title": "Vision",
+          "icon": "media/eye.svg"
+        }
+      ]
+    },
+    "views": {
+      "vision": [
+        {
+          "id": "vision.view",
+          "name": "Vision 控制台"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "vision.refresh",
+        "title": "刷新状态",
+        "category": "Vision",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vision.startProxy",
+        "title": "启动代理",
+        "category": "Vision",
+        "icon": "$(play)"
+      }
+    ],
+    "configuration": {
+      "title": "Vision",
+      "properties": {
+        "vision.port": {
+          "type": "number",
+          "default": 8787,
+          "description": "控制 API 端口（默认读 ~/.claude/vision-eyes/config.json 的 port，此项可覆盖）"
+        },
+        "vision.proxyUrl": {
+          "type": "string",
+          "default": "",
+          "description": "覆盖代理地址（默认 http://localhost:<port>），代理不在本机时用"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "vsce package"
+  }
+}

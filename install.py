@@ -39,7 +39,7 @@ PIP_DEPS = ["fastapi", "uvicorn", "httpx"]
 
 # 部署需要的文件清单（拷贝时排除 __pycache__/.git/日志/state/用户 config）
 NEEDED_FILES = [
-    "proxy.py", "config_loader.py", "prompts.py", "vision_client.py",
+    "proxy.py", "config_loader.py", "control_api.py", "prompts.py", "vision_client.py",
     "mcp-vision.js", "identify.py", "batch_identify.py", "collect_images.py",
     "scan_one.py", "read_port.py", "toggle.py", "start_proxy.py",
     "start-proxy.bat", "status.bat", "requirements.txt", "install.py", "README.md",

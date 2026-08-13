@@ -1,0 +1,112 @@
+/* Vision 控制台样式：跟随 VS Code 主题变量，深浅色自适应 */
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground);
+  background: transparent;
+  padding: 10px 12px;
+  margin: 0;
+}
+
+/* 健康横幅 */
+.health {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.health.ok { background: var(--vscode-testing-iconPassed, #2ea043); color: #fff; }
+.health.down { background: var(--vscode-testing-iconFailed, #f14c4c); color: #fff; }
+.health .dot { font-size: 10px; }
+.health .btn { margin-left: auto; background: rgba(255,255,255,.2); color: #fff; }
+
+/* 区块 */
+.section {
+  margin-bottom: 14px;
+}
+.section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--vscode-descriptionForeground);
+  margin: 0 0 6px;
+}
+
+/* 按钮行 */
+.btn-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.btn {
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.btn.active {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-color: var(--vscode-focusBorder);
+}
+
+/* 输入 */
+.input, .select {
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, #8888);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-right: 6px;
+  max-width: 150px;
+}
+.input[type="number"] { width: 70px; }
+.select { max-width: 100%; width: 100%; margin-top: 4px; }
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.field label { min-width: 44px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+
+.warn {
+  color: var(--vscode-editorWarning-foreground, #d7a32a);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.kv {
+  font-size: 12px;
+  padding: 2px 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* toast */
+.toast {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 10;
+  background: var(--vscode-notifications-background);
+  color: var(--vscode-notifications-foreground);
+  border: 1px solid var(--vscode-notifications-border, #8888);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}

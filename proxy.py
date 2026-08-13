@@ -7,6 +7,7 @@ from starlette.background import BackgroundTask
 
 import config_loader
 import vision_client
+import control_api  # VS Code 插件控制端点：/api/status|level|backend|config
 
 # 本代理服务纯文本模型：通过 CC Switch 让模型的 ANTHROPIC_BASE_URL 指向本代理。
 # 分类器请求也必须能正常通过：本代理只在 body 里确实含 image 块时才做图片→文字转换，
@@ -497,6 +498,70 @@ async def identify(request: Request):
     except Exception as e:
         log.error("req=%s identify error %s: %s duration=%.2fs",
                   rid, type(e).__name__, e, time.time() - t0, exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ---------------- 控制 API（VS Code 插件用） ----------------
+# 只读写本地 config.json / state / ollama，复用 control_api（内部再复用 toggle/config_loader）。
+# 必须在 passthrough catch-all 之前注册，否则被通配路由吞掉。
+# 安全：localhost 信任模型（与 /health 一致），不暴露识别路径。
+
+
+def _api_proxy_info() -> dict:
+    return {
+        "status": "ok",
+        "version": PROXY_VERSION,
+        "pid": os.getpid(),
+        "uptime": round(time.time() - STARTED_AT, 1),
+        "code_mtime": CODE_MTIME,
+    }
+
+
+@app.get("/api/status")
+async def api_status():
+    """合并状态：档位/后端/端口/上游/ollama/云端/proxy 健康。"""
+    try:
+        return JSONResponse(control_api.get_status(_api_proxy_info()))
+    except Exception as e:
+        log.error("api/status error %s: %s", type(e).__name__, e, exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/level")
+async def api_level(request: Request):
+    try:
+        body = await request.json()
+        return JSONResponse(control_api.set_level(body.get("level"), _api_proxy_info()))
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        log.error("api/level error %s: %s", type(e).__name__, e, exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/backend")
+async def api_backend(request: Request):
+    try:
+        body = await request.json()
+        return JSONResponse(control_api.set_backend(
+            body.get("kind"), body.get("port"), body.get("provider"), _api_proxy_info()))
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        log.error("api/backend error %s: %s", type(e).__name__, e, exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/config")
+async def api_config(request: Request):
+    try:
+        body = await request.json()
+        patch = body.get("patch", body)  # 兼容 {patch:{...}} 与直接传 patch
+        return JSONResponse(control_api.set_config(patch, _api_proxy_info()))
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        log.error("api/config error %s: %s", type(e).__name__, e, exc_info=True)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
