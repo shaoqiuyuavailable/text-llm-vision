@@ -132,9 +132,27 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 | **本地 Ollama**（默认） | 未配云端 key | 零费用、数据不出机器、离线可用 |
 | **云端通道** | 配置 `cloud.base_url` + 环境变量 `DASHSCOPE_API_KEY` | 识别质量更高（如 qwen-vl-plus）、更快，图出机器 |
 
-**切换规则**：`_post_b64` 检测到环境变量 `DASHSCOPE_API_KEY`（或 config 的 `cloud.api_key`）就走云端，否则回退本地——**不配 key 即纯本地，配了自动用云端**。三次判定（Scan/Zoom/Guess）、场景分层、缓存、超时等全部复用，只换底层请求。`config.json` 不入库（key 走环境变量，防泄露）。
+**切换规则**：`_post_b64` 检测到**任一平台**配了 key（环境变量 `<NAME>_API_KEY` 或 config 的 `api_key`）就走云端，否则回退本地——**不配 key 即纯本地，配了自动用云端**。三次判定（Scan/Zoom/Guess）、场景分层、缓存、超时等全部复用，只换底层请求。`config.json` 不入库（key 走环境变量，防泄露）。
 
-> 示例（阿里云百炼 DashScope）：`config.json` 的 `cloud` 块填 `base_url`（`...compatible-mode/v1`）和 `model`（如 `qwen-vl-plus`），`api_key` 留空；启动时设环境变量 `DASHSCOPE_API_KEY=<你的key>`。识别流程不变，仅请求改走 `/chat/completions`。
+**多平台轮换**：`config.json` 的 `cloud` 块是数组：
+
+```json
+{
+  "cloud": {
+    "active": "dashscope",
+    "clouds": [
+      { "name": "dashscope", "base_url": "https://.../compatible-mode/v1", "model": "qwen-vl-plus", "api_key": "" },
+      { "name": "siliconflow", "base_url": "", "model": "", "api_key": "" }
+    ]
+  }
+}
+```
+
+- `active` 指定当前平台（按 name 匹配）；**留空则自动选第一个配了 key 的平台**
+- 每个平台的 key 从环境变量 `<NAME大写>_API_KEY`（如 `DASHSCOPE_API_KEY`）或 `api_key` 读
+- 手动轮换 = 改 `cloud.active` + 设对应环境变量，重启会话生效；`active` 指向不存在平台时安全回退本地
+
+> 示例（阿里云百炼 DashScope）：`cloud.active="dashscope"`，启动时设 `DASHSCOPE_API_KEY=<你的key>`。识别流程不变，仅请求改走 `/chat/completions`。
 
 实测 33 张跨类别语料：**大类准确率 91%，完全准确率（大类+小类）85%**。
 
