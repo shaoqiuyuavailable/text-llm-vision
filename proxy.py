@@ -12,19 +12,25 @@ UPSTREAM = "https://api.deepseek.com/anthropic"
 STATE = os.path.expanduser("~/.claude/vision-eyes/state")
 
 _HOP = {"host", "content-length", "connection", "transfer-encoding", "content-encoding"}
+_cache_cleared = False  # off 时只清一次缓存
 
 
 def vision_level() -> int:
     """读取视觉档位：0=off 1=fast 2=standard 3=deep。
     兼容旧格式 state 文件（on/off）。"""
+    global _cache_cleared
     try:
         raw = open(STATE).read().strip()
         if raw.isdigit():
             lv = int(raw)
-            return lv if 0 <= lv <= 3 else 1
-        return 1 if raw != "off" else 0  # 旧 on/off 格式
+            lv = lv if 0 <= lv <= 3 else 1
+        else:
+            lv = 1 if raw != "off" else 0  # 旧 on/off 格式
     except Exception:
-        return 1  # 默认 fast
+        lv = 1  # 默认 fast
+    if lv != 0:
+        _cache_cleared = False  # 非 off 时重置，下次 off 再清
+    return lv
 
 
 def fwd_headers(request: Request) -> dict:
@@ -64,6 +70,10 @@ def _convert_images(body: dict) -> dict:
                 n += 1
                 lv = vision_level()
                 if lv == 0:
+                    global _cache_cleared
+                    if not _cache_cleared:
+                        vision_client.clear_cache()  # off 时清理识别缓存，防内存滞留
+                        _cache_cleared = True
                     out.append({"type": "text", "text": f"[图片{n}（视觉已关闭，未识别）]"})
                 else:
                     # 档位→精度：1=fast 2=standard 3=deep

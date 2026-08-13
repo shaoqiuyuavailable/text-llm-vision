@@ -18,6 +18,13 @@ import httpx
 import config_loader
 
 _cache = {}
+MAX_CACHE = 100  # 缓存上限：防内存无限膨胀，超出清最旧（FIFO）
+
+
+def clear_cache():
+    """清空识别缓存。off 档时调用，释放内存。"""
+    _cache.clear()
+
 
 # 大类 -> 允许的小类（从 config 读，这里仅为默认兜底）
 MAIN_SCENES = ("person", "animal", "document", "chart", "generic")
@@ -48,6 +55,8 @@ def _post_b64(b64: str, prompt: str, temperature: float) -> str:
     r.raise_for_status()
     text = r.json()["response"].strip()
     _cache[key] = text
+    while len(_cache) > MAX_CACHE:  # 超上限清最旧（FIFO）
+        _cache.pop(next(iter(_cache)))
     return text
 
 
