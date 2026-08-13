@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.log
+*.log.*
+
+# 运行时状态
+state
+proxy.log
+hook_err.log
+
+# 测试产物
+detail_*.txt
+identify_result.txt
+
+# 本地配置（含可能的敏感信息，不提交）
+# settings.json / .claude.json 在用户目录，不在本项目内
