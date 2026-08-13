@@ -8,12 +8,69 @@ from starlette.background import BackgroundTask
 import config_loader
 import vision_client
 
-# 本代理只服务 DeepSeek（纯文本模型）：通过 CC Switch 让 DeepSeek 的 ANTHROPIC_BASE_URL 指向本代理。
+# 本代理服务纯文本模型：通过 CC Switch 让模型的 ANTHROPIC_BASE_URL 指向本代理。
 # 分类器请求也必须能正常通过：本代理只在 body 里确实含 image 块时才做图片→文字转换，
 # 其它一切请求（含分类器）原样透传，绝不影响转发。
-UPSTREAM = "https://api.deepseek.com/anthropic"
+# 上游不写死：按请求头 token 反查 CC Switch provider 真实上游，回退 config.upstream。
 STATE = os.path.expanduser("~/.claude/vision-eyes/state")
 PORT = config_loader.get_port()  # 监听端口：config.json 的 port（默认 8787），改端口需同步 CC Switch base URL
+
+# CC Switch 数据库：providers.settings_config 存各 provider 的 token，provider_endpoints 存真实上游。
+# 请求头 token 匹配到某 provider → 用它的非-localhost endpoint 作为上游（自动跟随切换）。
+CC_SWITCH_DB = os.path.expanduser("~/.cc-switch/cc-switch.db")
+
+
+def resolve_upstream(request: Request) -> str:
+    """按请求头 token 反查 CC Switch provider 的真实上游（方案 C），回退 config.upstream（方案 A）。
+
+    优先级：
+    1. 请求头 Authorization/x-api-key 的 token → 查 db providers.settings_config → 匹配 provider
+    2. 该 provider 在 provider_endpoints 的非 localhost endpoint → 作为上游
+    3. 查不到 → config.upstream（默认 DeepSeek）
+    代理收到请求说明用户切到了走代理的 provider（base URL 指向本代理），
+    token 是 provider 特有的，用它精确定位上游。"""
+    token = ""
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[7:].strip()
+    if not token:
+        token = request.headers.get("x-api-key", "")
+    if not token:
+        return config_loader.get().get("upstream", "https://api.deepseek.com/anthropic")
+    try:
+        import sqlite3
+        conn = sqlite3.connect(CC_SWITCH_DB, timeout=3)
+        try:
+            # 找 settings_config 里含该 token 的 provider
+            cur = conn.cursor()
+            cur.execute("SELECT settings_config FROM providers WHERE app_type='claude'")
+            for (sc,) in cur.fetchall():
+                if not sc:
+                    continue
+                try:
+                    import json as _json
+                    cfg = _json.loads(sc)
+                    env_token = cfg.get("env", {}).get("ANTHROPIC_AUTH_TOKEN", "")
+                    if env_token and env_token == token:
+                        # 该 provider 的真实上游（非 localhost endpoint）
+                        cur2 = conn.cursor()
+                        cur2.execute(
+                            "SELECT url FROM provider_endpoints "
+                            "WHERE provider_id=(SELECT id FROM providers WHERE settings_config=?) "
+                            "AND url NOT LIKE 'http://localhost%' AND url NOT LIKE 'http://127.0.0.1%' "
+                            "ORDER BY added_at LIMIT 1",
+                            (sc,))
+                        row = cur2.fetchone()
+                        if row:
+                            return row[0]
+                        break  # provider 匹配但无真实上游 → 用 config 兜底
+                except Exception:
+                    continue
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return config_loader.get().get("upstream", "https://api.deepseek.com/anthropic")
 PROXY_VERSION = "0.4.0"
 LOG_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(LOG_DIR, "vision-proxy.log")
@@ -372,8 +429,10 @@ async def messages(request: Request):
                 log.debug("req=%s convert %s duration=%.2fs", rid, _fmt_stats(stats), time.time() - t1)
 
     t2 = time.time()
+    upstream = resolve_upstream(request)  # 按 token 反查 CC Switch provider 上游（回退 config）
+    log.debug("req=%s upstream=%s", rid, upstream)
     client = httpx.AsyncClient(timeout=60.0, trust_env=False)
-    req = client.build_request("POST", f"{UPSTREAM}/v1/messages",
+    req = client.build_request("POST", f"{upstream}/v1/messages",
                                headers=fwd_headers(request), json=body)
     try:
         resp, retried = await _send_with_retry(client, req, rid, "messages")
@@ -446,8 +505,10 @@ async def passthrough(request: Request, path: str):
     # 非 /v1/messages 的所有请求（分类器、count_tokens 等）：原样透传，绝不干预
     rid = uuid.uuid4().hex[:8]
     t0 = time.time()
+    upstream = resolve_upstream(request)  # 按 token 反查 CC Switch provider 上游（回退 config）
+    log.debug("req=%s passthrough upstream=%s", rid, upstream)
     client = httpx.AsyncClient(timeout=60.0, trust_env=False)
-    req = client.build_request(request.method, f"{UPSTREAM}/{path}",
+    req = client.build_request(request.method, f"{upstream}/{path}",
                                headers=fwd_headers(request), content=await request.body())
     try:
         resp, retried = await _send_with_retry(client, req, rid, f"passthrough {request.method} /{path}")
