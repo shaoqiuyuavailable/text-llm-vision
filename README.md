@@ -271,7 +271,9 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 1. **VS Code 扩展的 Read hook 绕过**（[upstream bug #37540](https://github.com/anthropics/claude-code/issues/37540)）：扩展的工具执行层绕过 PreToolUse hook，Read 图片 hook 不生效。因此「模型自主看图」走 **MCP describe_image**（不依赖 hook），而非 hook。**不要用 Read 读图片**（返回 `[Unsupported Image]`）。
 2. **auto mode 分类器与第三方模型不兼容**（[upstream #68387](https://github.com/anthropics/claude-code/issues/68387)）：DeepSeek/GLM 等第三方模型驱动不了官方分类器，报「temporarily unavailable」是误导性错误。建议用 `acceptEdits` / `bypassPermissions` 权限模式，或把常用命令加进 `permissions.allow`。
 3. **8B 模型边界**：Qwen2.5-VL(8B) 对复杂图表/长文档精细 OCR 弱于大模型；对「无鲸鱼/文字硬线索的角色」无法自行联想到品牌（需要主模型结合上下文复核）。
-4. **缓存**：同图 sha256 内存缓存（代理进程重启后清空，首次会重新识别）。
+4. **缓存轻量化**：同图 sha256 **内存缓存**（不落盘、不占用磁盘）；上限 100 条 FIFO 清理（防内存无限膨胀）；`/vision off` 时主动清空缓存 + `ollama stop` 释放显存。代理进程重启后缓存自然清空。
+5. **软路由失效风险（已知）**：`CLAUDE.md` 引导模型用 `describe_image` 属「软约束」，第三方模型（如 GLM）可能无视指令固执调用原生 Read 工具，触发 upstream bug（见第 1 条）。当前无代理层强制手段，属已知限制；若遇模型不听话，需手动提示改用 `describe_image`。
+6. **SSE 流式**：代理用 `aiter_bytes()` **流式透传不缓冲**，保留打字机效果（不受拦截影响）。
 
 ## 文件清单
 
@@ -293,16 +295,33 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 
 ## 附：CLAUDE.md 看图规范
 
+> **为什么用软规则 + 为什么增强**：本项目无法在代理层强制拦截 Read 图片（VS Code 扩展的工具执行层绕过 hook，见「已知限制」第 1 条），路由控制权只能靠 CLAUDE.md 的 Prompt 引导。增强后的软规则把「绝对不要用 Read 读图片」从「建议」提升为「强制 + 失败路径识别」（Read 拿到 `[Unsupported Image]` 后必须改用 `describe_image`）。**这是软约束，第三方模型仍可能无视**——属已知限制（见「已知限制」第 5 条），但增强版能显著降低失效概率。
+
+将以下内容写入 `~/.claude/CLAUDE.md`（所有会话生效）：
+
 ```markdown
 # 视觉能力使用规范
 
-当前主力模型是纯文本模型，没有视觉能力。看图时必须走本地视觉工具：
+看图时必须走本地视觉工具，**不能直接用 Read 读图片**（会返回 `[Unsupported Image]`）。
 
-1. 需要查看图片时，调用 MCP 工具 `describe_image`（传图片绝对路径），
-   本地视觉模型识别后返回文字描述。
-2. 不要用 Read 工具读图片文件（只会得到 [Unsupported Image]）。
-3. 用户粘贴的图片已由代理自动转成文字，无需额外处理。
-4. 复杂对象识别可用 describe_image 的 prompt 参数指定关注特征。
+## 看图规范（强制）
 
-本地识别脚本：python "~/.claude/vision-eyes/identify.py" <图片路径>
+1. **需要查看图片内容时，调用 MCP 工具 `describe_image`**（传图片绝对路径），
+   它会用本地视觉模型（Qwen2.5-VL）识别后返回文字描述。
+2. **绝对不要用 Read 工具读图片文件**——Read 读图片只会得到 `[Unsupported Image]`，
+   是**已知的失败路径**。如果尝试 Read 图片后拿到 `[Unsupported Image]`，立刻改用 `describe_image`。
+3. **判断图片路径的标准**：文件扩展名是 `.jpg/.jpeg/.png/.webp/.gif/.bmp` 的就是图片，
+   必须走 `describe_image`；只有非图片文本文件才用 Read。
+4. 如果用户粘贴了图片，代理已自动把图片转成文字描述进入上下文，无需额外处理。
+5. 识别复杂对象（型号、角色、图表）时，`describe_image` 支持可选 `prompt` 参数。
+
+> **为什么不能 Read 图片**：本环境的 VS Code 扩展存在上游 bug，Read 图片时无法通过 hook
+> 拦截识别，且主力模型无视觉，Read 只会拿到 `[Unsupported Image]`。`describe_image` 是本环境下唯一可靠的看图方式。
+
+## 命令工具
+
+本地识别脚本：`python "~/.claude/vision-eyes/identify.py" <图片路径>`
+- 默认三段式：scan（描述+场景）→ zoom（按类提取事实）→ guess（大胆推测）
+- 可选 `--scan` / `--zoom` / `--guess` / `--ask "自定义问题"`
+- 批量识别目录：`python "~/.claude/vision-eyes/batch_identify.py" <目录> [输出文件]`
 ```
