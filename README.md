@@ -296,3 +296,23 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 
 本地识别脚本：python "~/.claude/vision-eyes/identify.py" <图片路径>
 ```
+
+## 平台兼容（mac / Linux 分支）
+
+项目主体（`proxy.py` / `vision_client.py` / `identify.py` 等）是纯 Python，**跨平台可用**。Windows 专属部分（`start-proxy.bat`、settings 里的 `cmd /c` hook、`C:\` 路径）在 `mac` 与 `linux` 分支中替换为 bash 版（`start-proxy.sh`）：
+
+```bash
+bash start-proxy.sh   # 幂等启动代理（lsof 检测 8787，不重复拉起）
+```
+
+settings.json 的 SessionStart hook 对应改为：
+
+```json
+{ "hooks": [ { "type": "command", "command": "bash \"$HOME/.claude/vision-eyes/start-proxy.sh\"" } ] }
+```
+
+路径示例：mac `/Users/<USER>/.claude/vision-eyes/`，Linux `/home/<USER>/.claude/vision-eyes/`。
+
+> **免责声明**：`mac` 与 `linux` 分支是作者「心情好顺手做」的兼容适配，**未经完整测试，不保证正确性**。仅替换了启动脚本与路径习惯，未做系统级验证。请使用者自行谨慎验证后再用于生产环境。
+>
+> **维护邀请**：如果你在 macOS / Linux 上验证并修复了问题，欢迎提交 PR 或开 issue，共同完善跨平台支持。作者会尽力跟进。
