@@ -71,16 +71,21 @@ def _set_active(cfg: dict, name: str):
 
 
 def _cmd(args, timeout=20):
-    """执行命令返回 (code, out)；Windows 上 npm 的 claude 是 .cmd，回退 cmd /c。"""
+    """执行命令返回 (code, out)；Windows 上 npm 的 claude 是 .cmd，回退 cmd /c。
+
+    Windows 且父进程无控制台（如 detached 的 uvicorn 代理）时，spawn 控制台子进程
+    会新建 cmd 黑窗——加 CREATE_NO_WINDOW 隐藏（根治「每 5 秒弹黑窗」）。"""
+    kwargs = dict(capture_output=True, text=True, timeout=timeout,
+                  encoding="utf-8", errors="replace")
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     try:
-        p = subprocess.run(args, capture_output=True, text=True, timeout=timeout,
-                           encoding="utf-8", errors="replace")
+        p = subprocess.run(args, **kwargs)
         return p.returncode, (p.stdout or "") + (p.stderr or "")
     except FileNotFoundError:
         if os.name == "nt":
             try:
-                p = subprocess.run(["cmd", "/c", *args], capture_output=True, text=True,
-                                   timeout=timeout, encoding="utf-8", errors="replace")
+                p = subprocess.run(["cmd", "/c", *args], **kwargs)
                 return p.returncode, (p.stdout or "") + (p.stderr or "")
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 pass

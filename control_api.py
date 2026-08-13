@@ -7,6 +7,7 @@
 供 proxy.py 路由调用；也可独立 import 单测。
 """
 import os
+import time
 
 import config_loader
 import toggle
@@ -14,6 +15,11 @@ import toggle
 STATE = toggle.STATE  # ~/.claude/vision-eyes/state
 ALLOWED_CONFIG_KEYS = {"upstream", "ollama"}
 OLLAMA_NUM_KEYS = ("temperature", "top_p")
+
+# ollama 服务状态缓存：get_status 被插件每 5s 轮询，若每次都 spawn `ollama list`
+# 频繁启动子进程（虽已 CREATE_NO_WINDOW 不弹窗）也是浪费。缓存 15s。
+OLLAMA_CACHE_TTL = 15
+_ollama_cache = {"ts": 0.0, "data": None}
 
 
 def _read_level() -> int:
@@ -31,16 +37,25 @@ def _read_level() -> int:
 
 
 def _ollama_service() -> dict:
-    """ollama 服务是否运行 + 当前已拉取模型。复用 toggle._cmd（Windows cmd /c 回退）。"""
+    """ollama 服务是否运行 + 当前已拉取模型（15s 缓存，防频繁 spawn `ollama list`）。
+
+    复用 toggle._cmd（Windows 上已加 CREATE_NO_WINDOW 不弹黑窗）。"""
+    global _ollama_cache
+    now = time.time()
+    if now - _ollama_cache["ts"] < OLLAMA_CACHE_TTL:
+        return _ollama_cache["data"]
     code, out = toggle._cmd(["ollama", "list"])
     if code != 0:
-        return {"running": False, "model": ""}
-    models = []
-    for line in out.strip().splitlines()[1:]:
-        parts = line.split()
-        if parts:
-            models.append(parts[0])
-    return {"running": True, "model": models[0] if models else ""}
+        result = {"running": False, "model": ""}
+    else:
+        models = []
+        for line in out.strip().splitlines()[1:]:
+            parts = line.split()
+            if parts:
+                models.append(parts[0])
+        result = {"running": True, "model": models[0] if models else ""}
+    _ollama_cache = {"ts": now, "data": result}
+    return result
 
 
 def _cloud_list(cfg) -> list:

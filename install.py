@@ -67,16 +67,19 @@ def run(cmd, timeout=30):
     """执行命令，返回 (returncode, stdout)。失败不抛。
 
     Windows 上 npm 安装的 claude 是 .cmd 批处理，list 形式直接执行报
-    FileNotFoundError（WinError 2），回退经 `cmd /c` 解析。"""
+    FileNotFoundError（WinError 2），回退经 `cmd /c` 解析。
+    Windows 加 CREATE_NO_WINDOW：父进程无控制台时子进程不弹 cmd 黑窗。"""
+    kwargs = dict(capture_output=True, text=True,
+                  timeout=timeout, encoding="utf-8", errors="replace")
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True,
-                           timeout=timeout, encoding="utf-8", errors="replace")
+        p = subprocess.run(cmd, **kwargs)
         return p.returncode, (p.stdout or "") + (p.stderr or "")
     except FileNotFoundError:
         if os.name == "nt":
             try:
-                p = subprocess.run(["cmd", "/c", *cmd], capture_output=True, text=True,
-                                   timeout=timeout, encoding="utf-8", errors="replace")
+                p = subprocess.run(["cmd", "/c", *cmd], **kwargs)
                 return p.returncode, (p.stdout or "") + (p.stderr or "")
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 pass
