@@ -136,8 +136,23 @@ def set_backend(kind: str, arg: str = "") -> int:
             print(f"  {n}: key {mark} model={_cloud_info(cfg, n).get('model', '') or '(未配)'}")
         return 0
 
+    if kind == "help":
+        print("vision — 本地视觉控制")
+        print()
+        print("用法:")
+        print("  vision 0|1|2|3|on|off      档位（识别精度，与后端无关）")
+        print("      0=off 1=fast 2=standard 3=deep；on→1 off→0")
+        print("  vision local [端口]        切本地 Ollama 后端；可选指定端口(默认保持)")
+        print("  vision cloud [厂商]        切云端后端；可选指定厂商(默认当前/第一个)")
+        print("  vision list                查看档位/后端/端口/各厂商 key")
+        print("  vision help                显示本帮助")
+        print()
+        print("逻辑隔离：local 不碰云端厂商列表，cloud 不碰端口，档位不碰后端。")
+        print("云端 key：环境变量 <厂商大写>_API_KEY 或 config.cloud.api_key。")
+        return 0
+
     print(f"unknown subcommand: {kind}")
-    print("usage: vision 0|1|2|3|on|off | local [port] | cloud [厂商] | list")
+    print("usage: vision 0-3|local[端口]|cloud[厂商]|list|help")
     return 1
 
 
@@ -152,6 +167,8 @@ def main():
         return set_backend("cloud", args[1] if len(args) > 1 else "")
     if first in ("list", "状态"):
         return set_backend("list")
+    if first in ("help", "帮助", "-h", "--help"):
+        return set_backend("help")
     # 档位（不碰后端）
     val = parse(args[0])
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
