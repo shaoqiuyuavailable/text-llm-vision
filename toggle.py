@@ -174,6 +174,16 @@ def doctor() -> int:
     if not ok:
         print("   → 运行 install.py 自动补齐 commands/vision.md 与 permissions.allow")
 
+    # 7. 多宿主 MCP 注册
+    try:
+        import mcp_hosts
+        mcp_hosts.SERVER_PATH = os.path.join(os.path.expanduser("~/.claude/vision-eyes"), "mcp_server.py")
+        print("\n-- 多宿主 MCP 注册（install.py --mcp <host> 补全）--")
+        for host, ok, detail in mcp_hosts.host_status():
+            print(f"{'✓' if ok else '✗'}  {host}: {detail}")
+    except ImportError:
+        pass  # 旧部署无 mcp_hosts.py，忽略（doctor 其余项仍有效）
+
     print()
     print("全部 ✓ → 功能就绪；有 ✗ → 按提示修复后重跑 vision doctor")
     return 0

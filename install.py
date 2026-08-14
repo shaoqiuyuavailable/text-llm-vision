@@ -40,7 +40,8 @@ PIP_DEPS = ["fastapi", "uvicorn", "httpx"]
 # 部署需要的文件清单（拷贝时排除 __pycache__/.git/日志/state/用户 config）
 NEEDED_FILES = [
     "proxy.py", "config_loader.py", "control_api.py", "prompts.py", "vision_client.py",
-    "mcp-vision.js", "identify.py", "batch_identify.py", "collect_images.py",
+    "mcp-vision.js", "mcp_server.py", "mcp_hosts.py",
+    "identify.py", "batch_identify.py", "collect_images.py",
     "scan_one.py", "read_port.py", "toggle.py", "start_proxy.py",
     "start-proxy.bat", "status.bat", "requirements.txt", "install.py", "README.md",
 ]
@@ -244,17 +245,27 @@ def ensure_mcp() -> bool:
     if mcp_registered():
         mark(True, "MCP server `vision` 已注册")
         return True
-    node_js = os.path.join(TARGET, "mcp-vision.js")
-    cmd = ["claude", "mcp", "add", "--scope", "user", "vision",
-           "-e", f"VISION_IDENTIFY_URL=http://127.0.0.1:{PORT}",
-           "--", "node", f'"{node_js}"']
+    server = os.path.join(TARGET, "mcp_server.py")
+    cmd = ["claude", "mcp", "add", "--scope", "user", "vision", "--", sys.executable, server]
     code, out = run(cmd, timeout=30)
     ok = code == 0 and mcp_registered()
-    mark(ok, "注册 MCP server `vision`")
+    mark(ok, "注册 MCP server `vision`（mcp_server.py）")
     if not ok:
-        print("   → 修复: claude mcp add --scope user vision "
-              f"-e VISION_IDENTIFY_URL=http://127.0.0.1:{PORT} -- node \"{node_js}\"")
+        print(f"   → 修复: claude mcp add --scope user vision -- {sys.executable} \"{server}\"")
     return ok
+
+
+def register_mcp(host_arg: str) -> int:
+    """--mcp 入口：注册到指定宿主或 all。"""
+    import mcp_hosts
+    mcp_hosts.SERVER_PATH = os.path.join(TARGET, "mcp_server.py")
+    if host_arg == "all":
+        rows = mcp_hosts.register_all()
+    else:
+        rows = mcp_hosts.register_host(host_arg)
+    for r in rows:
+        print(r)
+    return 0
 
 
 def ensure_hook() -> bool:
@@ -383,9 +394,13 @@ def main() -> int:
     ap.add_argument("--auto", action="store_true", help="自动装 pip 依赖 + ollama pull 模型")
     ap.add_argument("--point-proxy", action="store_true", help="设置 ANTHROPIC_BASE_URL 指向代理（备份）")
     ap.add_argument("--rollback", action="store_true", help="恢复 ANTHROPIC_BASE_URL")
+    ap.add_argument("--mcp", metavar="HOST", default="",
+                    help="注册 MCP 到宿主: claude|codex|opencode|cline|continue|copilot|cursor|all")
     args = ap.parse_args()
 
     print(f"== text-llm-vision 部署器（端口 :{PORT}）==")
+    if args.mcp:
+        return register_mcp(args.mcp)
     if args.point_proxy:
         return point_proxy()
     if args.rollback:
