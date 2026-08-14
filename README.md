@@ -138,7 +138,7 @@ python install.py --mcp claude    # 或指定单一宿主（claude/codex/opencod
 
 ### 请求流转（粘贴图片 · 代理兜底路径）
 
-> 这是**兜底路径**：仅覆盖「用户把图片粘贴进对话」的场景（VS Code 扩展粘贴 → image 块直接进请求体 → 代理自动转文字）。模型**主动**读本地图片文件走 MCP 主路径（`describe_image`）。操作层（`identify.py` CLI、VS Code 面板）也复用同一识别引擎。
+> 这是**兜底路径**：覆盖「用户把图片粘贴进对话」的场景——**走代理的宿主都兜底，不止 Claude Code**。按协议分：Anthropic 链路（Claude Code）识别 `image` 块；OpenAI Chat 链路（Cline / OpenCode / Aider）识别 `image_url` 块；OpenAI Responses 链路（Codex）同理（代码见「三协议」章节）。**前提**：宿主 Base URL 指向代理（Claude Code 用 `ANTHROPIC_BASE_URL`，OpenAI 端用 `:8787/v1`），且 OpenAI 链路需配 `config.upstream_openai`（未配返回 400）。Continue / Copilot / Cursor 未接代理链路，走 MCP 主路径识图。模型**主动**读本地图片文件走 MCP 主路径（`describe_image`）。操作层（`identify.py` CLI、VS Code 面板）也复用同一识别引擎。
 
 ```
 Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──▶ [上游动态解析]
@@ -167,10 +167,22 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 | 组件 | 面向对象 | 入口 | 运行方式 |
 |---|---|---|---|
 | `mcp_server.py`（MCP 主路径） | **任意支持 MCP 的宿主**（Claude Code / Codex / OpenCode / Cline / Continue / Copilot / Cursor） | 宿主按注册 spawn `python mcp_server.py`（stdio） | **按需子进程**：宿主启动时自动拉起，宿主关闭时随 stdin EOF 退出——不是常驻服务 |
-| `proxy.py`（代理兜底） | Claude Code（对话内粘贴图）+ 操作层（`/identify`、VS Code 面板） | `start-proxy.bat` / `start_proxy.py`（uvicorn :8787） | **常驻守护**：SessionStart hook 自动拉起；`restart_proxy.py` 自杀重启 |
+| `proxy.py`（代理兜底） | 走代理的宿主（Anthropic=Claude Code / OpenAI Chat=Cline·OpenCode·Aider / Responses=Codex，前提见「请求流转（粘贴图片）」）+ 操作层（`/identify`、VS Code 面板） | `start-proxy.bat` / `start_proxy.py`（uvicorn :8787） | **常驻守护**：SessionStart hook 自动拉起；`restart_proxy.py` 自杀重启 |
 | `vscode-ext/`（配置面板） | VS Code 里的可视化配置 | VS Code 侧边栏 TreeView | 薄 UI，读 `/api/status`、写 `/api/*`，每 5s 刷新 |
 
 **MCP「自启动」的准确含义**：MCP server 不自启动、不是 daemon——它是宿主的按需 stdio 子进程。只要注册指向 `mcp_server.py`（由 `install.py --mcp claude` 完成），宿主**每次启动都会自动 spawn 它**；宿主退出即随之退出。真正「常驻 + 自启」的是 **proxy**（SessionStart hook 拉起 uvicorn）。
+
+**宿主 × 视觉路径对照**：
+
+| 宿主 | MCP 主路径（describe_image 等） | 代理兜底（粘贴图转文字） | 前提 |
+|---|---|---|---|
+| Claude Code | ✅ `install.py --mcp claude` | ✅ Anthropic `image` 块 | `ANTHROPIC_BASE_URL` 指向代理 |
+| Cline | ✅ `install.py --mcp cline` | ✅ OpenAI Chat `image_url` 块 | Base URL `:8787/v1` + 配 `upstream_openai` |
+| OpenCode | ✅ `install.py --mcp opencode` | ✅ OpenAI Chat `image_url` 块 | 同上 |
+| Codex | ✅ `install.py --mcp codex` | ✅ OpenAI Responses | 同上 |
+| Continue / Copilot / Cursor | ✅ MCP 注册 | —（走 MCP 主路径，未接代理链路） | — |
+
+> 代理兜底只对**走代理的纯文本模型**生效；其余宿主一律用 MCP 主路径识图，不依赖代理。
 
 **入口命令速查**：
 - 挂 MCP（多宿主）：`python install.py --mcp <claude|codex|opencode|cline|continue|copilot|cursor|all>`——同名已注册先 remove 再 add（`mcp_hosts.claude_mcp_upsert`）

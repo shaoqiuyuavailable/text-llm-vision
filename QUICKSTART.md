@@ -51,7 +51,7 @@ python install.py --auto
 | 场景 | 怎么做 |
 |---|---|
 | 模型主动看图 | 引用图片路径 → 模型调 `describe_image`（MCP 主路径，任何宿主可用） |
-| 对话内粘贴图 | 粘贴 → 代理（:8787）自动转文字（仅 Claude Code 兜底路径） |
+| 对话内粘贴图 | 粘贴 → 代理（:8787）自动转文字（兜底：Anthropic=Claude Code / OpenAI=Cline·OpenCode·Codex，前提 Base URL 指代理 + OpenAI 链路配 `upstream_openai`） |
 | 换识别精度 | `/vision 0-3`（0=off 1=fast 2=standard 3=deep） |
 | 换后端 | `/vision local [端口]` / `/vision cloud [厂商]`；或设 `VISION_API_KEY`+`VISION_API_BASE_URL`（env 云） |
 | 换模型 | `VISION_MODEL=llava` env 或 config `ollama.model` |
