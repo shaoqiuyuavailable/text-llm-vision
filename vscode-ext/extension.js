@@ -52,6 +52,16 @@ function readModels() {
   }
 }
 
+// 改绑场景模型：写 config.json router[scene]（顺带确保 prompts_version=2，让配置在 config_loader 门内生效）
+function setRouterScene(scene, value) {
+  const p = path.join(DEPLOY_DIR(), 'config.json');
+  const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+  raw.router = raw.router || {};
+  raw.router[scene] = value;
+  if (!raw.prompts_version) raw.prompts_version = 2;
+  fs.writeFileSync(p, JSON.stringify(raw, null, 2));
+}
+
 // 执行 toggle.py model 子命令（下载/删除/替换），detached 不弹窗
 function runModelCmd(args) {
   return new Promise((resolve) => {
@@ -157,21 +167,22 @@ class VisionTreeProvider {
       items.push(new VisionTreeItem(`${c.name}: ${c.model || '(未配model)'} key=${c.has_key ? '✓' : '✗'}`,
         'provider', c.name === d.active_provider ? '当前' : '点击切换', { kind: 'provider', provider: c.name }));
     });
-    // ── 模型管理（v1.5 多路由模型：本地 + 云端，按场景配模型）──
+    // ── 模型管理（v1.5 多路由模型：本地 + 云端，按场景配模型，可交互）──
     const { models, router } = readModels();
     items.push(new VisionTreeItem('── 模型管理 ──', 'header', ''));
+    items.push(new VisionTreeItem('＋ 添加模型', 'modelAdd', '点击添加', { kind: 'modelAdd' }));
     const modelNames = Object.keys(models);
     if (modelNames.length === 0) {
-      items.push(new VisionTreeItem('模型: 无（config.models 空）', 'info', '用 toggle.py model add'));
+      items.push(new VisionTreeItem('模型: 无（config.models 空）', 'info', '用上方「＋ 添加模型」'));
     }
     for (const name of modelNames) {
       const m = models[name];
       items.push(new VisionTreeItem(`模型: ${name} (${m.type}${m.provider ? '/' + m.provider : ''})`,
         'model', m.purpose || '点击操作', { kind: 'modelManage', model: name }));
     }
-    items.push(new VisionTreeItem('场景映射（router）', 'header', ''));
+    items.push(new VisionTreeItem('场景映射（router）· 点击改绑', 'header', ''));
     for (const [scene, val] of Object.entries(router)) {
-      items.push(new VisionTreeItem(`  ${scene}: ${val}`, 'info', '改绑: toggle.py model replace'));
+      items.push(new VisionTreeItem(`  ${scene}: ${val}`, 'routerScene', '点击改绑', { kind: 'routerScene', scene, value: val }));
     }
     items.push(new VisionTreeItem(`代理: ${d.proxy && d.proxy.status === 'ok' ? '运行中' : '?'} v${(d.proxy && d.proxy.version) || '?'} · pid ${(d.proxy && d.proxy.pid) || '?'}`, 'info', ''));
     items.push(new VisionTreeItem(`ollama: ${d.ollama_service && d.ollama_service.running ? '运行中 ' + (d.ollama_service.model || '') : '未运行'}`, 'info', ''));
@@ -322,6 +333,43 @@ function activate(context) {
           case 'provider':
             if (action.provider) await post(baseUrl, '/api/backend', { kind: 'cloud', provider: action.provider });
             break;
+          case 'modelAdd': {
+            const name = await vscode.window.showInputBox({ prompt: '模型名（如 llava:7b / qwen-vl-plus）' });
+            if (!name || !name.trim()) break;
+            const typePick = await vscode.window.showQuickPick(
+              [{ label: 'ollama（本地）', value: 'ollama' }, { label: 'cloud（云端）', value: 'cloud' },
+               { label: 'pip（如 rapid-table）', value: 'pip' }],
+              { placeHolder: '模型类型' });
+            if (!typePick) break;
+            const args = ['add', name.trim(), '--type', typePick.value];
+            if (typePick.value === 'cloud') {
+              const provider = await vscode.window.showInputBox({ prompt: '云端厂商（config.cloud.clouds 里的名字，如 dashscope）' });
+              if (!provider || !provider.trim()) break;
+              args.push('--provider', provider.trim());
+            }
+            const purpose = await vscode.window.showInputBox({ prompt: '用途（可选，如 default/gui/table）' });
+            if (purpose && purpose.trim()) args.push('--purpose', purpose.trim());
+            const dl = await vscode.window.showQuickPick(
+              [{ label: '下载', value: 'yes' }, { label: '暂不下载', value: 'no' }], { placeHolder: '添加后下载？' });
+            if (dl && dl.value === 'yes') args.push('--download');
+            await runModelCmd(args);
+            break;
+          }
+          case 'routerScene': {
+            const val = await vscode.window.showInputBox({
+              value: action.value || '',
+              prompt: '输入场景路由值（如 vlm:qwen2.5vl / ocr，模型须在 models 注册）',
+            });
+            if (val !== undefined && val.trim()) {
+              try {
+                setRouterScene(action.scene, val.trim());
+                vscode.window.showInformationMessage(`场景 ${action.scene} 已改绑 → ${val.trim()}`);
+              } catch (e) {
+                vscode.window.showErrorMessage('写 config.json 失败: ' + ((e && e.message) || e));
+              }
+            }
+            break;
+          }
           case 'modelManage': {
             const pick = await vscode.window.showQuickPick(
               [{ label: '下载', value: 'download' }, { label: '逻辑删除', value: 'rm' },
