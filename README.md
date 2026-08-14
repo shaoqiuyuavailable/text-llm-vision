@@ -1,21 +1,23 @@
-# visual-ds：给纯文本模型装上「本地视觉眼睛」
+# text-llm-vision：给纯文本模型装上「本地视觉眼睛」
 
-**让没有视觉的纯文本 LLM（DeepSeek、GLM 等）在 Claude Code 里真正"看得见"**——图片进去，文字描述出来，模型基于描述正常推理。全程本地、零 API 费用、数据不出机器。
+**让没有视觉的纯文本 LLM（DeepSeek、Qwen、Kimi、GLM 等）在任意主流 AI 编码智能体（Claude Code / Cline / OpenCode / Codex）里真正"看得见"**——图片进去，文字描述出来，模型基于描述正常推理。全程本地、零 API 费用、数据不出机器。
 
-> **一句话定位**：不是一个简单的"视觉代理"，而是一个 **本地视觉增强引擎**——专为"纯文本模型 + 终端/IDE"场景设计，用 **MCP + 代理 + 软规则三层互补架构** + **Scan/Zoom/Guess 三次判定流水线**，把 8B 小模型的视觉潜力榨到极致，同时做到开箱即用的深度集成。
+> **一句话定位**：不是一个简单的"视觉代理"，而是一个 **本地视觉增强引擎**——专为"纯文本模型 + 任意 AI 编码智能体"设计，用 **MCP + 代理 + 软规则三层互补架构** + **Scan/Zoom/Guess 三次判定流水线**，**三协议通用**（Anthropic / OpenAI Chat / OpenAI Responses），**Docker 可部署**，配 **VS Code 可视化控制面板**，把 8B 小模型的视觉潜力榨到极致。
 
-参考了 [glm-vision](https://github.com/shiss3/glm-vision) 的「MCP + 代理 + 软规则」三层互补架构，视觉后端落在本地 Ollama + Qwen2.5-VL。
+参考了 [glm-vision](https://github.com/shiss3/glm-vision) 的「MCP + 代理 + 软规则」三层互补架构，视觉后端落在本地 Ollama + Qwen2.5-VL（模型可更换）。
 
-> **English / Keywords**: A **local vision proxy** for text-only LLMs (DeepSeek, GLM). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), and **CLAUDE.md soft rules**. Vision backend: **Ollama + Qwen2.5-VL** with a **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, deep **Claude Code** integration (vision level toggling, status bar, auto-start). Similar projects: glm-vision, ds-vision-skill-plus.
+> **English / Keywords**: A **local vision proxy** for text-only LLMs (DeepSeek, Qwen, Kimi, GLM) used by **any AI coding agent** (Claude Code / Cline / OpenCode / Codex). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), **CLAUDE.md soft rules**. **Triple protocol**: Anthropic Messages, OpenAI Chat Completions, OpenAI Responses — decoupled from any vendor. Vision backend: **Ollama + Qwen2.5-VL** (model swappable via config) with **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, **Docker** deployable, **VS Code** control panel. Upstream decoupled: CC Switch auto-follow (Anthropic) + config `upstream_openai` (OpenAI). Similar projects: glm-vision, ds-vision-skill-plus.
 
 ## 四大差异化卖点
 
 | 卖点 | 说明 |
 |------|------|
 | 🏗️ **三层互补架构** | MCP（模型主动识图）+ 反向代理（兜底粘贴图）+ CLAUDE.md 软规则（引导用对工具）。覆盖**所有**视觉场景，纯文本模型永远只收 text、不报错 |
-| 🎯 **三次判定流水线** | `Scan`（扫描判场景）→ `Zoom`（按场景聚焦细节）→ `Guess`（大胆推测），配合场景分层 + 温度分层，细节提取远胜竞品的"单次描述定终身" |
-| 🔒 **100% 本地 & 零费用** | 本地 Ollama + Qwen2.5-VL，数据不出机器、不按次收费，适合敏感截图和内部文档 |
-| ⚙️ **Claude Code 深度集成** | `/vision 0/1/2/3` 档位切换、状态栏实时显示、SessionStart 自动启动、超时 Masking + 历史图占位 + 隔离壳等一整套鲁棒性兜底 |
+| 🎯 **三次判定流水线** | `Scan`（扫描判场景）→ `Zoom`（按场景聚焦细节）→ `Guess`（大胆推测），配合场景分层 + 温度分层 + OCR 自动路由，细节提取远胜竞品的"单次描述定终身" |
+| 🔌 **三协议通用（解除强绑定）** | **Anthropic**（Claude Code）+ **OpenAI Chat**（Cline / OpenCode / Aider）+ **OpenAI Responses**（Codex CLI），一个代理喂所有主流 AI 编码智能体 |
+| 🔒 **100% 本地 & 零费用** | 本地 Ollama + Qwen2.5-VL（模型可换），数据不出机器、不按次收费，适合敏感截图和内部文档 |
+| 🐳 **Docker 镜像化** | 独立镜像暴露 8787，容器内连宿主机 Ollama，挂载 CC Switch / config 保留双源 |
+| 🎛️ **VS Code 可视化面板** | TreeView 侧边栏实时展示/修改档位、后端、端口、温度、上游、grounding、云端厂商 |
 
 ## 使用场景
 
@@ -25,9 +27,10 @@
 |------|------|
 | ① 用户无缝贴图 | 直接把图片粘贴进对话，模型基于图片内容回答（感知不到中间层）|
 | ② 模型自主看图 | agentic 场景，模型自己查看本地图片文件 |
-| ③ 批量图片处理 | 目录扫描、归类、批量识别 |
-| ④ 隐私 / 离线 | 图片不出机器，不经过云 API（适合敏感截图、内部文档）|
-| ⑤ 零成本 | 本地 Ollama 识别，不按次收费，高频使用不心疼 |
+| ③ 多智能体接入 | Claude Code / Cline / OpenCode / Codex 配纯文本模型时，图片统一被代理转文字 |
+| ④ 批量图片处理 | 目录扫描、归类、批量识别 |
+| ⑤ 隐私 / 离线 | 图片不出机器，不经过云 API（适合敏感截图、内部文档）|
+| ⑥ 零成本 | 本地 Ollama 识别，不按次收费，高频使用不心疼 |
 
 **不适用的场景**：
 - 需极高精度 OCR（复杂图表 / 长文档精细识别）——8B 模型不够，应换大模型 API
@@ -46,6 +49,9 @@
 | 7 | 跨模型切换不干扰 | 只有纯文本模型走代理，CC Switch 切走即绕过 |
 | 8 | 模型不占系统盘 | `OLLAMA_MODELS` 重定向到 F 盘 |
 | 9 | agentic 时序一致 | MCP `describe_image`（绕开 VS Code Read hook bug）|
+| 10 | 解除 Claude 强绑定 | 三协议入站（Anthropic/OpenAI Chat/Responses）+ 上游双链路解耦 |
+| 11 | 支持多智能体 | Cline/OpenCode/Codex 配 Base URL 指向代理即用（实测 Cline 全链路通）|
+| 12 | Docker 独立部署 | 镜像 + compose，连宿主机 Ollama，挂载 CC Switch/config |
 
 ## 架构
 
@@ -78,7 +84,10 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
               ↳ 无 image 块 → 原样透传（含分类器等一切请求）
 ```
 
-> **上游解绑（不写死 DeepSeek）**：代理不再硬编码上游。转发前按**请求头 token 反查 CC Switch 数据库**（`providers.settings_config` 匹配 token → `provider_endpoints` 取非 localhost 的真实上游），**CC Switch 切换 provider 时自动跟随**；查不到则回退 `config.json` 的 `upstream`（默认 DeepSeek）。只有 base URL 指向本代理的纯文本模型走代理，切走即绕过。
+> **上游解绑（双链路各自解耦，不写死任何厂商）**：
+> - **Anthropic 链路**（Claude Code）：转发前按**请求头 token 反查 CC Switch 数据库**（`providers.settings_config` 匹配 token → `provider_endpoints` 取非 localhost 的真实上游），**CC Switch 切换 provider 时自动跟随**；查不到回退 `config.json` 的 `upstream`。**已实测兼容上游模型：DeepSeek、Qwen、Kimi**。
+> - **OpenAI 链路**（Cline/OpenCode/Codex）：转发到 **`config.upstream_openai`**（固定配置，默认空需自配，如 `https://api.deepseek.com`）；**不做 CC Switch 反查**（规划范围外）。
+> 只有 base URL 指向本代理的纯文本模型走代理，切走即绕过。
 
 > **长会话历史图处理**：同一请求里的 messages 可能包含多轮旧图（长对话每次都带全量历史）。代理只对**最后一条含图的 user 消息**做真识别（当前轮新增），更早的旧图统一替换为 `[历史图片已省略]` 占位——**旧图不消耗每请求 3 张的识别配额**。这样既保证纯文本模型收不到 image 块（防 ReadError），又避免长会话被历史图反复重识别拖慢/挤占当前图。
 
@@ -88,7 +97,24 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 模型需要看图 → 调 describe_image(路径) → MCP → 本地 /identify → 返回文字描述
 ```
 
-## 三次判定识别（核心能力）
+### 三协议（Anthropic + OpenAI Chat + OpenAI Responses，解除 Claude 强绑定）
+
+| 入站端点 | 上游 | 适用客户端 |
+|---|---|---|
+| `POST /v1/messages`（Anthropic） | `{upstream}`（CC Switch 按 token 反查 / config 兜底） | Claude Code |
+| `POST /v1/chat/completions`（OpenAI Chat） | `{upstream_openai}`（config.json，默认空） | Cline / OpenCode / Aider 等 |
+| `POST /v1/responses`（OpenAI Responses） | `{upstream_openai}` | Codex CLI |
+| `GET /v1/models` 等辅助端点 | 按 `anthropic-version` 头分流（Anthropic→upstream，OpenAI→upstream_openai） | 各客户端连接探测 |
+
+> **核心洞察**：代理的真正价值是 **image→text 转换**，与协议无关。OpenAI 入站解析 content 里的 `image_url`（`data:<mime>;base64,...`），**复用同一套识别逻辑**（`vision_client.analyze` + 隔离壳 + 配额/超时）转成文字，转发到 `config.upstream_openai`。**未配置 `upstream_openai` 时 OpenAI 入站返回 400 明确提示**（默认空，不绑定任何厂商）。Anthropic 链路完全不变。
+
+**客户端接入（Base URL 的 `/v1` 差异是最大坑）**：
+- **Anthropic 客户端**（Claude Code）：Base URL 填根路径 `http://localhost:8787`（客户端自动加 `/v1/messages`）
+- **OpenAI 客户端**（Cline / OpenCode / Codex / Aider）：Base URL 填 `http://localhost:8787/v1`（必须含 `/v1`，否则 404）
+- 配**纯文本模型**时图片被代理自动转文字；OpenAI 链路需先配 `upstream_openai`
+- 客户端经系统代理访问 localhost 会被劫持（Windows 系统代理 + httpx 不认 `127.*` 通配符），需关 localhost 代理或 `trust_env=false`
+
+
 
 本地识别不是「简单描述」，而是**三次判定 + 场景分层 + 温度分层**。通过视觉档位（`/vision 1/2/3`）接入主流程——代理贴图和 MCP `describe_image` 都读取档位：
 
@@ -102,7 +128,9 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 档位决定调用次数：`1=fast`（仅 scan 的描述部分）、`2=standard`（scan+zoom）、`3=deep`（scan+zoom+guess 完整三次 + **空间结构 grounding**）。
 
-> **空间结构（deep 档专属）**：deep 档额外调用 Qwen2.5-VL 的 grounding 能力，输出**结构化 JSON**（元素名 + 边界框 bbox 坐标）+ 原图尺寸。解决纯文本模型读散文描述时的「空间迷失」——CSS 布局、UI 对齐、图表坐标等场景，主模型基于结构化坐标推理拓扑关系，而非脑补。档位设置见「视觉档位开关」章节。
+> **空间结构（deep 档专属）**：deep 档额外调用 grounding 能力，输出**结构化 JSON**（元素名 + 边界框 bbox 坐标）+ 原图尺寸。解决纯文本模型读散文描述时的「空间迷失」——CSS 布局、UI 对齐、图表坐标等场景，主模型基于结构化坐标推理拓扑关系，而非脑补。档位设置见「视觉档位开关」章节。
+>
+> **模型无关（可更换视觉模型）**：识别模型完全由 `config.json` 的 `ollama.model`（本地）或 `cloud.xxx.model`（云端）决定，换模型改配置即可。`scan/zoom/guess` 提示词通用；**`grounding`（空间结构）通过 `ollama.grounding` 开关控制**（默认 `true`）——换不支持边界框定位的模型时设 `false`，deep 档自动跳过 spatial（提示词已通用化，不再绑定 Qwen 格式）。
 
 **场景分层**（5 大类 × 小类）：
 
@@ -181,6 +209,26 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 | Python | ≥ 3.10 | 代理 + 识别脚本 |
 | Node.js | ≥ 18 | MCP server |
 | Claude Code | 最新 | 主运行环境 |
+
+### 0. 一键部署（推荐，1 步完成）
+
+> 前置：装好 [Ollama](https://ollama.com)、Python ≥3.10、Node.js ≥18（见下「前置环境」）。
+
+```bash
+python install.py                 # 检测环境 + 自动配置（MCP/hook/CLAUDE.md/权限）+ 启动代理
+python install.py --auto          # 首次部署推荐：额外自动 pip 装依赖 + ollama pull 视觉模型
+python install.py --check         # 只体检不执行，输出 ✓/✗ 清单（等价 `vision doctor`）
+python install.py --point-proxy   # 最后一步：BASE_URL 指向代理（自动备份，可回退）
+python install.py --rollback      # 回退 BASE_URL（从 state/ 备份恢复）
+```
+
+**`install.py` 幂等**：重复运行安全，已配置项自动跳过，不覆盖你现有的 `config.json`。它把下面 1-9 步压缩成一次运行——检测 Python/Node/Ollama/模型 → 部署代码 → 注册 MCP → 写 SessionStart hook → 追加 CLAUDE.md 引导 → 建 `/vision` 命令 → 启动代理并验活。
+
+**排错**：`vision doctor`（或 `install.py --check`）逐项体检四处配置，每项 ✗ 都附带修复命令。
+
+> **⚠️ 关于最后一步（`--point-proxy`）**：它把 `ANTHROPIC_BASE_URL` 指向代理——这是唯一有断连风险的改动（改前自动备份到 `state/settings.json.bak.vision`，可 `--rollback` 恢复）。建议先 `install.py --check` 确认全 ✓ 再执行，改后**重启 Claude Code** 生效。已有视觉的模型不必走这一步（见下方第 5 步说明）。
+
+### 手动部署（可选：了解各环节细节，正常用上面一键部署）
 
 ### 1. 安装 Ollama 并拉取视觉模型
 
@@ -274,7 +322,7 @@ python -m uvicorn proxy:app --port $(python read_port.py)
 > 2. 出问题时，**手动改回直连 + 重启 Claude Code**（会话启动时加载 env，中途改不生效）
 > 3. 或临时关掉代理（代理挂时请求走不通，直连是逃生通道）
 >
-> 只有 DeepSeek（纯文本模型）需要指向代理；其它有视觉的模型用各自真实端点，不经过代理。
+> 只有纯文本模型（DeepSeek / Qwen / Kimi 等）需要指向代理；其它有视觉的模型用各自真实端点，不经过代理。
 
 ### 6. 注册 MCP server
 
@@ -311,9 +359,36 @@ claude mcp add --scope user vision -e VISION_IDENTIFY_URL=http://127.0.0.1:8787 
 - 粘贴图片 → 自动转文字
 - 让模型看本地图片 → 调用 `describe_image`
 
+### 10. Docker 部署（独立镜像，连宿主机 Ollama）
+
+把代理打包成独立镜像，暴露 8787，识别走**宿主机 Ollama**（容器内经 `host.docker.internal` 访问，需 Docker 支持该主机名——Windows Docker Desktop / Linux 需加 `--add-host=host.docker.internal:host-gateway`）。
+
+```bash
+# 配置 OpenAI 上游（双向协议的 OpenAI 链路；Anthropic 链路走 CC Switch/config.upstream 不变）
+# 编辑 config.json 加： "upstream_openai": "https://api.example.com"
+
+docker compose up -d --build          # 构建并后台启动
+curl http://localhost:8787/health     # 验活
+curl http://localhost:8787/api/status # 状态（ollama_service 走 HTTP 探测，容器内无 CLI 也能显示）
+```
+
+**docker-compose.yml 关键点**：
+- `OLLAMA_URL=http://host.docker.internal:11434/api/generate`（连宿主机 Ollama）
+- 挂载 `~/.cc-switch`（resolve_upstream 按 token 反查上游，只读）
+- 挂载 `~/.claude/vision-eyes/config.json`（**可写**，让 /api/config 改温度/上游同步到宿主）
+- 档位 state 不持久化（容器重启回默认 1，属运行时状态）
+
+> Windows 路径含空格（如 `C:\Users\shaoqiu yu`）时，compose 用 `${HOME}` 展开；异常则改完整路径。OpenAI 客户端经系统代理访问 `localhost:8787` 可能被代理劫持，需在客户端关闭 localhost 代理或设 `trust_env=false`。
+
 ## 命令行工具
 
 ```
+python install.py                    # 一键部署（检测+自动配置+启动代理）
+python install.py --check            # 只体检（✓/✗ 清单）
+python install.py --auto             # 自动装依赖 + ollama pull 模型
+python install.py --point-proxy      # 最后一步：BASE_URL 指向代理（备份）
+python install.py --rollback         # 回退 BASE_URL
+
 python identify.py <图片路径>            # 三次判定全流程
 python identify.py <路径> --precision fast|standard|deep  # 指定精度（默认 deep，含空间结构）
 python identify.py <路径> --type person.anime  # 手动指定大类.小类
@@ -324,6 +399,27 @@ python batch_identify.py <目录> [输出]    # 批量识别目录
 python scan_one.py <图片路径>             # JSON 输出（供脚本/代理用）
 python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集语料
 ```
+
+## VS Code 可视化插件（动态展示 + 修改配置）
+
+侧边栏插件，在 Claude Code for VS Code 里**可视化调节**配置。复用代理的**控制 API**（`/api/*`，内部复用 `control_api.py` → `toggle`/`config_loader`），插件只是薄 UI，不碰识别逻辑。
+
+**实现（TreeView 树视图）**：侧边栏树节点实时显示状态，**点击节点弹选择器/输入框修改**，每 5s 自动刷新。
+
+| 树节点 | 点击操作 | 底层调用 |
+|---|---|---|
+| 档位: fast (1) | 选 off/fast/standard/deep | `POST /api/level` |
+| 后端: local | 选本地/云端 + 厂商 | `POST /api/backend` |
+| 端口: 8787 | 输入端口（提示需重启） | `POST /api/backend` |
+| 温度 / top_p / grounding | 输入数值 / 选开·关 | `POST /api/config` |
+| 上游(Anthropic) | 输入地址（Claude Code 链路） | `POST /api/config` |
+| 上游(OpenAI) | 输入地址（Cline/OpenCode 链路） | `POST /api/config` |
+| 云端厂商 | 点厂商切换 | `POST /api/backend` |
+| 代理 / ollama | 只读状态 | `GET /api/status` |
+
+**安装**：`vscode-ext/` 下 `bash scripts/package.sh` 打包 `.vsix` → `code --install-extension`；或 `code .` + F5 调试开发（详见 `vscode-ext/README.md`）。
+
+> **为何用 TreeView 而非 WebviewView**：本环境（Claude Code for VS Code）下 WebviewView 的 `resolveWebviewView` **不触发**（provider 注册成功、但视图内容不渲染，报「没有可提供视图数据的已注册数据提供程序」）。TreeView 走 `registerTreeDataProvider`，机制完全不同，稳定可靠。
 
 ## 视觉档位
 
@@ -369,14 +465,17 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 11. **依赖缺失兜底（#5）**：`start-proxy.bat` 启动前预检 `python` + `uvicorn/fastapi/httpx`，失败给出明确提示；启动后用 `/health` 验活（而非只看端口），端口占用但无响应时告警。state/config 回退（#15/#16）不再静默——损坏时记 warning 落日志。
 12. **假死探测（#2）**：事件循环卡死时 HTTP 层不响应但端口仍监听（`/health` 测不出）。代理内置 **watchdog 守护线程**：每 30s 请求自身 `/health`，连续 3 次失败判假死 → 记 ERROR + `os._exit(1)` 自杀，下次 SessionStart 的 start-proxy.bat 自动拉起新进程。仅在 uvicorn 运行时启用（lifespan 启动），import/测试不触发。
 13. **上游断流日志（#10）**：SSE 流式转发中上游中途断流（ReadError/ConnectError）时，`_iter_upstream` 包装生成器记 `WARNING upstream stream interrupted mid-way` + 请求 ID。正常完成 / 客户端主动断开不记录（不算异常）。
-14. **端口可配置（#4）**：代理端口由 `config.json` 的 `port` 字段决定（默认 8787）。切换命令：`vision local <N>`（端口唯一入口，已并入 `local` 子命令），会写 config.json 并**提示同步三处**：CC Switch 里 DeepSeek 的 Base URL、MCP 注册的 `VISION_IDENTIFY_URL`、settings.json 的 `ANTHROPIC_BASE_URL`。改端口后需重启会话（SessionStart 会在新端口自动拉起代理）。
+14. **端口可配置（#4）**：代理端口由 `config.json` 的 `port` 字段决定（默认 8787）。切换命令：`vision local <N>`（端口唯一入口，已并入 `local` 子命令），会写 config.json 并**提示同步三处**：CC Switch 里纯文本模型 provider 的 Base URL、MCP 注册的 `VISION_IDENTIFY_URL`、settings.json 的 `ANTHROPIC_BASE_URL`。改端口后需重启会话（SessionStart 会在新端口自动拉起代理）。
 15. **上游重试策略（防重复扣费）**：代理**只重试连接断开类错误**（`ConnectError`/`ReadError`/`ReadTimeout` 等——这些保证请求未达服务端，重试不会重复扣费）。**5xx 一律不重试**（500/502/503/504）：服务端可能已生成内容并扣费，盲发会**双重扣费 + 幻觉**（曾因此额外扣费）。4xx 业务错误也不重试。所有非 2xx 直接透传给 Claude Code 处理。
+16. **粘贴图片全自动（非手动）**：对比 CC-Vision 等「hook 扫描 image-cache 注入」方案，本方案的粘贴场景已由**代理层全自动覆盖**——VS Code 扩展粘贴 → image block 直接进请求 → 代理 `_convert_images` 自动转文字，**零手动触发**（实测：本会话粘贴图被代理自动拦截转文字）。真正需要「手动调用 MCP describe_image」的只有**模型自主读图**（Read 图片路径），那是第 1 条 #37540 的环境盲区，非设计缺陷。
+17. **Windows 剪贴板兼容性（无需第三方）**：代理方案**不扫描剪贴板、不依赖 `image-cache` 落盘**，只要图片进请求体即拦截，天然跨平台。Windows 下 `Alt+V` 原生粘贴图片（[#18590](https://github.com/anthropics/claude-code/issues/18590) 官方确认非 bug）→ 代理照常识别，**无需 WSL / winclipshot 等第三方**。需第三方兜底的只是 Claude Code 自身 v2.1.140 回归（[#58658](https://github.com/anthropics/claude-code/issues/58658)：Windows 绝对路径粘贴不再附加为图片）。**CC-Vision 的 UserPromptSubmit hook 方案在本环境无效**：实测 VS Code 扩展粘贴**不落盘** `~/.claude/image-cache/`（本会话粘贴过图但目录不存在），hook 会静默空转——image-cache 是终端 CLI 专属落盘机制（官方 `imageStore.ts`）。
 
 ## 文件清单
 
 | 文件 | 作用 |
 |------|------|
-| `proxy.py` | 反向代理：image→text 转换 + 透传 + 整体日志 + /health 验活 |
+| `proxy.py` | 反向代理：image→text 转换 + 透传 + 整体日志 + /health 验活 + /api/* 控制端点 |
+| `control_api.py` | 控制 API 纯逻辑：get_status/set_level/set_backend/set_config（复用 toggle+config_loader） |
 | `vision_client.py` | 视觉识别客户端：scan/zoom/guess 三次判定 + 云端通道 + OCR 自动路由 |
 | `config_loader.py` | 读 config.json，缺失回退 prompts.py |
 | `config.json` | 场景/提示词/温度配置（唯一来源） |
@@ -386,11 +485,25 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `scan_one.py` | 单图 scan JSON 输出 |
 | `collect_images.py` | Wikimedia 类别语料采集 |
 | `mcp-vision.js` | MCP server：describe_image 工具 |
-| `toggle.py` | 视觉控制：档位 0/1/2/3 + 后端 local[端口]/cloud[厂商]/list |
+| `toggle.py` | 视觉控制：档位 0/1/2/3 + 后端 local[端口]/cloud[厂商]/list/doctor |
+| `install.py` | 一键部署：环境检测 + 自动配置（MCP/hook/CLAUDE.md/权限）+ 启动代理 + BASE_URL 备份回退 |
+| `vscode-ext/` | VS Code 可视化插件：侧边栏展示/修改配置（TreeView + extension.js + 打包脚本） |
+| `Dockerfile` / `docker-compose.yml` / `.dockerignore` | Docker 独立镜像：暴露 8787，连宿主机 Ollama，挂载 CC Switch/config |
 | `start-proxy.bat` / `start_proxy.py` | 启动代理（bat 薄壳，逻辑全在 Python：读端口/验活/拉起）|
 | `read_port.py` | 输出配置端口（供 bat/脚本用） |
 | `status.bat` | 状态栏（显示档位）|
 | `test_proxy.py` | 代理端到端测试（读配置端口） |
+
+## 许可证
+
+**text-llm-vision 自定义开源协议（个人/内部免费 · 商业需授权）**，详见 [LICENSE](LICENSE)。
+
+- **免费**：个人学习/研究、公司或组织**内部自用**（不对外盈利）
+- **商业需授权**：对外盈利（作为产品或服务出售、集成进收费产品、托管付费服务等）
+- 判断原则：**是否对外盈利**——内部自用免费，对外卖钱需授权
+- 覆盖全部组件：`proxy.py`、`mcp-vision.js`、`vscode-ext/`、Docker 镜像、CLI 工具
+
+商业授权联系：GitHub Issues。
 
 ## 附：CLAUDE.md 看图规范
 
@@ -424,23 +537,3 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 - 可选 `--scan` / `--zoom` / `--guess` / `--ask "自定义问题"`
 - 批量识别目录：`python "~/.claude/vision-eyes/batch_identify.py" <目录> [输出文件]`
 ```
-
-## 平台兼容（mac / Linux 分支）
-
-项目主体（`proxy.py` / `vision_client.py` / `identify.py` 等）是纯 Python，**跨平台可用**。Windows 专属部分（`start-proxy.bat`、settings 里的 `cmd /c` hook、`C:\` 路径）在 `mac` 与 `linux` 分支中替换为 bash 版（`start-proxy.sh`）：
-
-```bash
-bash start-proxy.sh   # 幂等启动代理（lsof 检测 8787，不重复拉起）
-```
-
-settings.json 的 SessionStart hook 对应改为：
-
-```json
-{ "hooks": [ { "type": "command", "command": "bash \"$HOME/.claude/vision-eyes/start-proxy.sh\"" } ] }
-```
-
-路径示例：mac `/Users/<USER>/.claude/vision-eyes/`，Linux `/home/<USER>/.claude/vision-eyes/`。
-
-> **免责声明**：`mac` 与 `linux` 分支是作者「心情好顺手做」的兼容适配，**未经完整测试，不保证正确性**。仅替换了启动脚本与路径习惯，未做系统级验证。请使用者自行谨慎验证后再用于生产环境。
->
-> **维护邀请**：如果你在 macOS / Linux 上验证并修复了问题，欢迎提交 PR 或开 issue，共同完善跨平台支持。作者会尽力跟进。
