@@ -12,6 +12,48 @@ const path = require('path');
 const DEPLOY_DIR = () => path.join(os.homedir(), '.claude', 'vision-eyes');
 const LEVEL_NAMES = { 0: 'off', 1: 'fast', 2: 'standard', 3: 'deep' };
 
+// 场景/引擎显示名映射：router 行渲染成可读中文（未知键回退原文）
+const SCENE_MAIN_LABELS = {
+  person: '人物', animal: '动物', plant: '植物', food: '食物', vehicle: '交通工具',
+  machine: '机器', architecture: '建筑', document: '文档', chart: '图表',
+  diagram: '图示', map: '地图', screenshot: '截图', object: '物品',
+  meme: '梗图', scene: '场景', unknown: '无法分类', generic: '通用',
+};
+const SCENE_SUB_LABELS = {
+  chat: '聊天', code: '代码', report: '报告', form: '表单', table: '表格', email: '邮件', unknown: '未知',
+  real_single: '单人', real_group: '多人', anime_character: '动漫角色', game_character: '游戏角色',
+  cosplay: '扮演', statue: '雕像', painting: '绘画',
+  mammal: '哺乳', bird: '鸟类', reptile: '爬行', amphibian: '两栖', fish: '鱼类', insect: '昆虫',
+  flower: '花', tree: '树', fruit: '水果', vegetable: '蔬菜', succulent: '多肉', garden: '花园',
+  dish: '菜肴', beverage: '饮品', snack: '零食', ingredient: '食材', dessert: '甜品', tableware: '餐具',
+  car: '汽车', motorcycle: '摩托', truck: '卡车', bus: '公交', train: '火车', airplane: '飞机',
+  ship: '船', bicycle: '单车',
+  industrial: '工业', household: '家用', electronics: '电子', tool: '工具', construction: '施工',
+  building: '建筑', interior: '室内', landmark: '地标', bridge: '桥梁', ruins: '遗迹',
+  line: '折线', bar: '柱状', pie: '饼图', scatter: '散点', radar: '雷达', heatmap: '热力',
+  flowchart: '流程', org_chart: '架构', network: '网络', sequence: '时序', gantt: '甘特', venn: '韦恩',
+  road: '道路', satellite: '卫星', floor_plan: '平面图', topographic: '地形', subway: '地铁', world: '世界',
+  software_ui: '软件界面', website: '网页', terminal: '终端', error: '报错', settings: '设置',
+  product: '产品', clothing: '衣物', furniture: '家具', book: '书籍', toy: '玩具',
+  template: '模板', text_overlay: '文字梗', reaction: '表情包', caption: '字幕',
+  landscape: '风景', cityscape: '城市', indoor: '室内', nature: '自然', sky: '天空', weather: '天气',
+};
+const ENGINE_LABELS = {
+  ocr: 'OCR 文字提取', vlm: '视觉识别', table: '表格解析', gui: '界面元素定位',
+  rapidtable: '表格解析', omniparser: '界面元素定位',
+};
+
+function sceneLabel(key) {
+  if (key === '_default') return '其他未列出的场景';
+  const [main, sub] = String(key).split('.');
+  const ml = SCENE_MAIN_LABELS[main] || main;
+  return sub ? `${ml}·${SCENE_SUB_LABELS[sub] || sub}` : ml;
+}
+function engineLabel(val) {
+  const eng = String(val || '').split(':')[0];
+  return ENGINE_LABELS[eng] || eng || '视觉识别';
+}
+
 // 读控制 API 地址：vision.proxyUrl 显式覆盖 > vision.port > 部署目录 config.json 的 port
 function readConfig() {
   const cfg = vscode.workspace.getConfiguration('vision');
@@ -172,12 +214,13 @@ class VisionTreeProvider {
       items.push(new VisionTreeItem(`模型: ${name} (${m.type}${m.provider ? '/' + m.provider : ''})`,
         'model', m.purpose || '点击操作', { kind: 'modelManage', model: name }));
     }
-    items.push(new VisionTreeItem('场景映射（router）', 'header', ''));
+    items.push(new VisionTreeItem('场景 → 引擎映射', 'header', ''));
     // 每场景显示生效执行实体（来自 /api/status scene_exec）：ocr → RapidOCR(内置)；vlm → 实际模型
     const execMap = d.scene_exec || {};
     for (const [scene, val] of Object.entries(router)) {
       const ex = execMap[scene];
-      items.push(new VisionTreeItem(`  ${scene}: ${val}${ex ? ` · ${ex}` : ''}`, 'routerScene', '点击改绑', { kind: 'routerScene', scene, value: val }));
+      const desc = (ex ? ex + ' · ' : '') + '点击改绑';
+      items.push(new VisionTreeItem(`  ${sceneLabel(scene)} → ${engineLabel(val)}`, 'routerScene', desc, { kind: 'routerScene', scene, value: val }));
     }
     items.push(new VisionTreeItem(`代理: ${d.proxy && d.proxy.status === 'ok' ? '运行中' : '?'} v${(d.proxy && d.proxy.version) || '?'} · pid ${(d.proxy && d.proxy.pid) || '?'}`, 'info', ''));
     items.push(new VisionTreeItem(`ollama: ${d.ollama_service && d.ollama_service.running ? '运行中 ' + (d.ollama_service.model || '') : '未运行'}`, 'info', ''));
