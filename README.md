@@ -48,7 +48,7 @@ python install.py --mcp claude    # 或指定单一宿主（claude/codex/opencod
 |------|------|------|
 | `VISION_MODEL` | 视觉模型名 | 覆盖 `config.json` 的 `ollama.model` |
 | `OLLAMA_URL` / `OLLAMA_BASE_URL` | Ollama 地址 | 两者等价（代码先读 `OLLAMA_URL`）；Docker 用 `OLLAMA_URL` 连宿主机 |
-| `VISION_API_KEY` | 云端 API key | 配了即切云端通道（合成 `env` 平台） |
+| `VISION_API_KEY` | 云端 API key | 需与 `VISION_API_BASE_URL` 成对配置；仅设 key 不生效 |
 | `VISION_API_BASE_URL` | 云端 API base URL | 与 `VISION_API_KEY` 配套 |
 | `VISION_PROVIDER` | 强制后端 | `local` 或 `cloud`；缺省按「是否有 key」自动选 |
 

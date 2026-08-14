@@ -114,15 +114,19 @@ def get() -> dict:
     if env_model:
         cfg["ollama"]["model"] = env_model
     env_key = os.environ.get("VISION_API_KEY", "").strip()
-    if env_key:
-        # 注入合成云平台（env 驱动），vision_client 经 cloud 通道走云端
+    env_base = os.environ.get("VISION_API_BASE_URL", "").strip()
+    if env_key and env_base:
+        # 注入合成云平台（env 驱动，需 key+base_url 成对），vision_client 经 cloud 通道走云端
         cfg["cloud"]["clouds"] = [{
             "name": "env",
-            "base_url": os.environ.get("VISION_API_BASE_URL", "").strip() or "https://api.example.com/v1",
+            "base_url": env_base,
             "model": env_model or "qwen-vl-plus",
             "api_key": env_key,
         }]
         cfg["cloud"]["active"] = "env"
+    elif env_key:
+        # 只有 key 无 base_url：不注入（避免 key 被 POST 到占位主机），保持纯本地
+        log.warning("VISION_API_KEY set but VISION_API_BASE_URL missing; staying local (env cloud requires both)")
     return cfg
 
 

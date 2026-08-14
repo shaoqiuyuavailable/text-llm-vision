@@ -41,6 +41,16 @@ def test_cloud_env_injects_synthetic_platform(monkeypatch, tmp_path):
     assert cfg["cloud"]["clouds"][0]["api_key"] == "sk-test"
 
 
+def test_env_key_without_base_url_stays_local(monkeypatch, tmp_path):
+    _fresh(monkeypatch, tmp_path)
+    monkeypatch.setenv("VISION_API_KEY", "sk-test")
+    # 不设 VISION_API_BASE_URL
+    cfg = config_loader.get()
+    assert cfg["cloud"].get("active") != "env"
+    urls = [c.get("base_url", "") for c in cfg["cloud"].get("clouds", [])]
+    assert "https://api.example.com/v1" not in urls
+
+
 def test_resolve_backend_local(monkeypatch, tmp_path):
     _fresh(monkeypatch, tmp_path)
     b = config_loader.resolve_backend()
