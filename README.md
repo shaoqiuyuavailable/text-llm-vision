@@ -139,7 +139,7 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 | person | anime / real / group |
 | animal | — |
 | document | chat / report / code / form / table |
-| chart | — |
+| chart | line（折线）/ bar（柱状）/ pie（饼图）/ scatter（散点）/ map（地图）|
 | generic | screenshot / landscape / object / meme |
 
 **温度分层**（每个提示词独立温度）：

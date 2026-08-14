@@ -21,13 +21,13 @@ SCENES = {
     "person": {"sub": ["anime", "real", "group"], "default_sub": "anime"},
     "animal": {"sub": [], "default_sub": ""},
     "document": {"sub": ["chat", "report", "code", "form", "table"], "default_sub": "report"},
-    "chart": {"sub": [], "default_sub": ""},
-    "generic": {"sub": ["screenshot", "landscape", "object"], "default_sub": "screenshot"},
+    "chart": {"sub": ["line", "bar", "pie", "scatter", "map"], "default_sub": ""},
+    "generic": {"sub": ["screenshot", "landscape", "object", "meme"], "default_sub": "screenshot"},
 }
 
 _PROMPTS = {
     "scan": {
-        "text": "用一句简短中文描述图片主要内容。然后判断图片类别，严格输出两行：\n大类: person(有真人或动漫角色)|animal(动物)|document(以文字为主要内容的文档/聊天/代码/表格)|chart(图形化数据展示，如折线柱状饼图散点图)|generic(其它，如界面截图/风景/物品/表情包)\n小类: 仅当大类是以下情况才填，否则必须填 无。person小类=anime(动漫角色)|real(真人)|group(多人合影)；document小类=chat(聊天记录)|report(文章报告)|code(代码)|form(表单)|table(表格)；generic小类=screenshot(软件/网页界面截图)|landscape(风景)|object(物品)|meme(表情包/梗图)。animal和chart没有小类，必须填无。\n判定要点：代码不是图表(属document.code)；表格不是图表(属document.table)；纯表情包/梗图归generic.meme而非person；界面截图归generic.screenshot而非document。\n不要输出除这两行之外的任何内容。",
+        "text": "用一句简短中文描述图片主要内容。然后判断图片类别，严格输出两行：\n大类: person(有真人或动漫角色)|animal(动物)|document(以文字为主要内容的文档/聊天/代码/表格)|chart(图形化数据展示，如折线柱状饼图散点图)|generic(其它，如界面截图/风景/物品/表情包)\n小类: 仅当大类是以下情况才填，否则必须填 无。person小类=anime(动漫角色)|real(真人)|group(多人合影)；document小类=chat(聊天记录)|report(文章报告)|code(代码)|form(表单)|table(表格)；chart小类=line(折线图)|bar(柱状图)|pie(饼图)|scatter(散点图)|map(地图/热力图)；generic小类=screenshot(软件/网页界面截图)|landscape(风景)|object(物品)|meme(表情包/梗图)。animal没有小类，必须填无。\n判定要点：代码不是图表(属document.code)；表格不是图表(属document.table)；纯表情包/梗图归generic.meme而非person；界面截图归generic.screenshot而非document。\n不要输出除这两行之外的任何内容。",
         "temperature": 0.3,
     },
     "zoom_person": {
@@ -43,11 +43,11 @@ _PROMPTS = {
         "temperature": 0.2,
     },
     "zoom_chart": {
-        "text": "逐项检查并回答：1)图表类型(散点图/折线/柱状/饼图/地图/表格等) 2)坐标轴含义和范围 3)数据点/趋势/关键数值 4)图中所有文字和标注 5)颜色/分组含义。若图中含代码、界面等特殊元素，额外提取对应信息。最后给出图表反映的核心结论。",
+        "text": "逐项检查并回答：1)图表类型(折线line/柱状bar/饼图pie/散点scatter/地图map等) 2)坐标轴含义和范围 3)数据点/趋势/关键数值——折线看趋势、柱状看对比、饼图看占比、散点看相关性、地图看地理分布 4)图中所有文字和标注 5)颜色/分组含义。若图中含代码、界面等特殊元素，额外提取对应信息。最后给出图表反映的核心结论。",
         "temperature": 0.3,
     },
     "zoom_generic": {
-        "text": "逐项检查并回答：1)主体对象是什么 2)场景和背景环境 3)画面中所有文字，有就原文照抄 4)标志/图案/特殊元素 5)整体布局。若图中含代码、表格、界面、地图、证件、表情包等特殊元素，额外提取对应信息。最后给出这张图片最可能的用途或性质。",
+        "text": "逐项检查并回答：1)主体对象是什么 2)场景和背景环境 3)画面中所有文字，有就原文照抄 4)标志/图案/特殊元素 5)整体布局。若图中含代码、表格、界面、地图、证件、表情包等特殊元素，额外提取对应信息。若是软件/网页界面截图(generic.screenshot)，额外逐项提取：窗口标题、菜单/按钮/标签文字、输入框内容、状态栏、弹窗/错误提示等 UI 元素。最后给出这张图片最可能的用途或性质。",
         "temperature": 0.3,
     },
     "guess": {
