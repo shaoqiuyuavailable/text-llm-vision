@@ -19,11 +19,11 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 import urllib.request
 
 import config_loader
+import _proc
 
 TARGET = os.path.expanduser("~/.claude/vision-eyes")   # 部署目标目录
 SETTINGS = os.path.expanduser("~/.claude/settings.json")
@@ -43,7 +43,7 @@ NEEDED_FILES = [
     "mcp-vision.js", "mcp_server.py", "mcp_hosts.py",
     "identify.py", "batch_identify.py", "collect_images.py",
     "scan_one.py", "read_port.py", "toggle.py", "start_proxy.py",
-    "start-proxy.bat", "status.bat", "requirements.txt", "install.py", "README.md",
+    "start-proxy.bat", "status.bat", "requirements.txt", "install.py", "_proc.py", "README.md",
 ]
 
 CLAUDE_MD_GUIDE = """\n# 视觉能力使用规范\n\n看图时必须走本地视觉工具，**不能直接用 Read 读图片**（会返回 `[Unsupported Image]`）。\n\n## 看图规范（强制）\n\n1. **需要查看图片内容时，调用 MCP 工具 `describe_image`**（传图片绝对路径），它会用本地视觉模型识别后返回文字描述。\n2. **绝对不要用 Read 工具读图片文件**——Read 读图片只会得到 `[Unsupported Image]`，是**已知的失败路径**。如果尝试 Read 图片后拿到 `[Unsupported Image]`，立刻改用 `describe_image`。\n3. **判断图片路径的标准**：文件扩展名是 `.jpg/.jpeg/.png/.webp/.gif/.bmp` 的就是图片，必须走 `describe_image`；只有非图片文本文件才用 Read。\n4. 如果用户粘贴了图片，代理已自动把图片转成文字描述进入上下文，无需额外处理。\n"""
@@ -65,28 +65,8 @@ argument-hint: 0-3|local|cloud|help
 # ---------- 工具 ----------
 
 def run(cmd, timeout=30):
-    """执行命令，返回 (returncode, stdout)。失败不抛。
-
-    Windows 上 npm 安装的 claude 是 .cmd 批处理，list 形式直接执行报
-    FileNotFoundError（WinError 2），回退经 `cmd /c` 解析。
-    Windows 加 CREATE_NO_WINDOW：父进程无控制台时子进程不弹 cmd 黑窗。"""
-    kwargs = dict(capture_output=True, text=True,
-                  timeout=timeout, encoding="utf-8", errors="replace")
-    if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-    try:
-        p = subprocess.run(cmd, **kwargs)
-        return p.returncode, (p.stdout or "") + (p.stderr or "")
-    except FileNotFoundError:
-        if os.name == "nt":
-            try:
-                p = subprocess.run(["cmd", "/c", *cmd], **kwargs)
-                return p.returncode, (p.stdout or "") + (p.stderr or "")
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
-        return 127, f"command not found: {cmd[0]}"
-    except subprocess.TimeoutExpired:
-        return 124, "timeout"
+    """执行命令，返回 (returncode, stdout)。失败不抛。委托 _proc.run_cmd。"""
+    return _proc.run_cmd(cmd, timeout)
 
 
 def read_settings():

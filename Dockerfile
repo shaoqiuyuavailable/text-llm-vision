@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 运行时文件（识别/代理/控制 API 纯逻辑 + MCP server；mcp-vision.js 是 node，本地跑不打包）
 COPY proxy.py config_loader.py control_api.py prompts.py vision_client.py toggle.py \
-     mcp_server.py mcp_hosts.py ./
+     mcp_server.py mcp_hosts.py _proc.py ./
 
 EXPOSE 8787
 # --host 0.0.0.0 供容器外访问；OLLAMA_URL 由 compose 注入连宿主机 Ollama

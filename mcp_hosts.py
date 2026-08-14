@@ -9,7 +9,7 @@
 """
 import json
 import os
-import subprocess
+import _proc
 import sys
 
 SERVER_PATH = os.path.join(os.path.expanduser("~/.claude/vision-eyes"), "mcp_server.py")
@@ -37,23 +37,7 @@ def _norm(p: str) -> str:
 
 
 def _cmd(args, timeout=20):
-    kwargs = dict(capture_output=True, text=True, timeout=timeout,
-                  encoding="utf-8", errors="replace")
-    if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-    try:
-        p = subprocess.run(args, **kwargs)
-        return p.returncode, (p.stdout or "") + (p.stderr or "")
-    except FileNotFoundError:
-        if os.name == "nt":
-            try:
-                p = subprocess.run(["cmd", "/c", *args], **kwargs)
-                return p.returncode, (p.stdout or "") + (p.stderr or "")
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
-        return 127, f"command not found: {args[0]}"
-    except subprocess.TimeoutExpired:
-        return 124, "timeout"
+    return _proc.run_cmd(args, timeout)
 
 
 def _load_json(path):
