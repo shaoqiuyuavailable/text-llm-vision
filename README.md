@@ -88,18 +88,24 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 模型需要看图 → 调 describe_image(路径) → MCP → 本地 /identify → 返回文字描述
 ```
 
-### 双向协议（Anthropic + OpenAI，解除 Claude 强绑定）
+### 三协议（Anthropic + OpenAI Chat + OpenAI Responses，解除 Claude 强绑定）
 
 | 入站端点 | 上游 | 适用客户端 |
 |---|---|---|
 | `POST /v1/messages`（Anthropic） | `{upstream}`（CC Switch 按 token 反查 / config 兜底） | Claude Code |
-| `POST /v1/chat/completions`（OpenAI） | `{upstream_openai}`（config.json，默认空） | 任意 OpenAI 兼容客户端 |
+| `POST /v1/chat/completions`（OpenAI Chat） | `{upstream_openai}`（config.json，默认空） | Cline / OpenCode / Aider 等 |
+| `POST /v1/responses`（OpenAI Responses） | `{upstream_openai}` | Codex CLI |
+| `GET /v1/models` 等辅助端点 | 按 `anthropic-version` 头分流（Anthropic→upstream，OpenAI→upstream_openai） | 各客户端连接探测 |
 
 > **核心洞察**：代理的真正价值是 **image→text 转换**，与协议无关。OpenAI 入站解析 content 里的 `image_url`（`data:<mime>;base64,...`），**复用同一套识别逻辑**（`vision_client.analyze` + 隔离壳 + 配额/超时）转成文字，转发到 `config.upstream_openai`。**未配置 `upstream_openai` 时 OpenAI 入站返回 400 明确提示**（默认空，不绑定任何厂商）。Anthropic 链路完全不变。
 
+**客户端接入（Base URL 的 `/v1` 差异是最大坑）**：
+- **Anthropic 客户端**（Claude Code）：Base URL 填根路径 `http://localhost:8787`（客户端自动加 `/v1/messages`）
+- **OpenAI 客户端**（Cline / OpenCode / Codex / Aider）：Base URL 填 `http://localhost:8787/v1`（必须含 `/v1`，否则 404）
+- 配**纯文本模型**时图片被代理自动转文字；OpenAI 链路需先配 `upstream_openai`
+- 客户端经系统代理访问 localhost 会被劫持（Windows 系统代理 + httpx 不认 `127.*` 通配符），需关 localhost 代理或 `trust_env=false`
 
 
-## 三次判定识别（核心能力）
 
 本地识别不是「简单描述」，而是**三次判定 + 场景分层 + 温度分层**。通过视觉档位（`/vision 1/2/3`）接入主流程——代理贴图和 MCP `describe_image` 都读取档位：
 
