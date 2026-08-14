@@ -257,7 +257,13 @@ def host_status() -> list:
     """[(宿主, 是否就绪, 详情)]，只读检查。"""
     rows = []
     code, out = _cmd(["claude", "mcp", "list"])
-    rows.append(("claude", code == 0 and "vision" in out, "claude mcp list"))
+    claude_ok = code == 0 and "vision" in out
+    if claude_ok and "mcp_server.py" in out:
+        rows.append(("claude", True, "claude mcp list"))
+    elif claude_ok:
+        rows.append(("claude", False, "claude mcp list (旧 node mcp-vision.js)"))
+    else:
+        rows.append(("claude", False, "claude mcp list"))
     rows.append(("codex", file_has_vision(codex_path()), codex_path()))
     rows.append(("opencode", file_has_vision(opencode_path()), opencode_path()))
     cline_rows = [p for p in cline_paths() if file_has_vision(p)]

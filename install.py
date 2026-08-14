@@ -134,11 +134,11 @@ def _importable(mod: str) -> bool:
 
 def check_node() -> bool:
     code, out = run(["node", "--version"])
-    ok = code == 0
-    mark(ok, f"Node.js ≥18 ({out.strip() if ok else '未安装'})")
-    if not ok:
-        print("   → 安装 Node.js ≥18（MCP server 运行环境）")
-    return ok
+    if code == 0:
+        mark(True, f"Node.js {out.strip()}（仅旧 mcp-vision.js 需要；新 Python MCP server 无需）")
+    else:
+        print("提示: 未检测到 Node.js（仅旧 mcp-vision.js 路径需要，新 mcp_server.py 纯 Python 无需）")
+    return True
 
 
 def check_ollama(auto=False) -> bool:
@@ -216,19 +216,26 @@ def ensure_config() -> bool:
     return False
 
 
-def mcp_registered() -> bool:
+def _mcp_list() -> str:
     code, out = run(["claude", "mcp", "list"], timeout=20)
-    return code == 0 and "vision" in out
+    return out if code == 0 else ""
 
 
 def ensure_mcp() -> bool:
-    if mcp_registered():
-        mark(True, "MCP server `vision` 已注册")
-        return True
+    out = _mcp_list()
+    if "vision" in out:
+        if "mcp_server.py" in out:
+            mark(True, "MCP server `vision` 已注册（mcp_server.py）")
+            return True
+        if "mcp-vision.js" in out:
+            print("⚠ 检测到旧 Node server（mcp-vision.js），覆盖为 mcp_server.py…")
+        else:
+            mark(True, "MCP server `vision` 已注册（非本脚本 command，保留）")
+            return True
     server = os.path.join(TARGET, "mcp_server.py")
     cmd = ["claude", "mcp", "add", "--scope", "user", "vision", "--", sys.executable, server]
-    code, out = run(cmd, timeout=30)
-    ok = code == 0 and mcp_registered()
+    code, _ = run(cmd, timeout=30)
+    ok = code == 0 and "vision" in _mcp_list()
     mark(ok, "注册 MCP server `vision`（mcp_server.py）")
     if not ok:
         print(f"   → 修复: claude mcp add --scope user vision -- {sys.executable} \"{server}\"")

@@ -74,6 +74,11 @@ def _cmd(args, timeout=20):
     return _proc.run_cmd(args, timeout)
 
 
+def mark(ok, text):
+    print(f"{'✓' if ok else '✗'}  {text}")
+    return ok
+
+
 def doctor() -> int:
     """逐项诊断四处配置（只读不写），输出 ✓/✗ 清单 + 每项修复命令。"""
     import urllib.request
@@ -105,11 +110,16 @@ def doctor() -> int:
 
     # 3. MCP 注册
     code, out = _cmd(["claude", "mcp", "list"])
-    has = code == 0 and "vision" in out
-    print(f"{'✓' if has else '✗'}  MCP server `vision`")
-    if not has:
-        node = os.path.join(home, "vision-eyes", "mcp-vision.js")
-        print(f"   → claude mcp add --scope user vision -e VISION_IDENTIFY_URL=http://127.0.0.1:{port} -- node \"{node}\"")
+    if code == 0 and "vision" in out and "mcp_server.py" in out:
+        mark(True, "MCP server `vision`（mcp_server.py）")
+    elif code == 0 and "vision" in out:
+        mark(False, "MCP server `vision` 是旧 Node 形态（mcp-vision.js）")
+        print("   → 迁移: claude mcp add --scope user vision -- python "
+              f"\"{os.path.join(home, 'vision-eyes', 'mcp_server.py')}\"")
+    else:
+        mark(False, "MCP server `vision` 未注册")
+        print("   → 修复: claude mcp add --scope user vision -- python "
+              f"\"{os.path.join(home, 'vision-eyes', 'mcp_server.py')}\"")
 
     # 4. ANTHROPIC_BASE_URL
     cur = ""

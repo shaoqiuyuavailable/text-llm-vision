@@ -1,5 +1,3 @@
-import os
-
 import install
 
 
@@ -8,26 +6,48 @@ def test_needed_files_include_new():
     assert "mcp_hosts.py" in install.NEEDED_FILES
 
 
-def test_ensure_mcp_uses_python_server(monkeypatch, tmp_path):
-    import mcp_hosts
-    server = os.path.join(tmp_path, "mcp_server.py")
-    monkeypatch.setattr(install, "TARGET", str(tmp_path))
-    monkeypatch.setattr(mcp_hosts, "SERVER_PATH", server)
+def test_ensure_mcp_skips_when_python_registered(monkeypatch):
     calls = []
+    monkeypatch.setattr(install, "_mcp_list", lambda: "vision  claude-2  python  C:/x/mcp_server.py")
+    monkeypatch.setattr(install, "run", lambda cmd, timeout=30: calls.append(cmd) or (0, ""))
+    assert install.ensure_mcp() is True
+    assert not any("mcp add" in " ".join(c) for c in calls)
+
+
+def test_ensure_mcp_overwrites_old_node(monkeypatch):
+    calls = []
+    monkeypatch.setattr(install, "_mcp_list", lambda: "vision  claude-2  node  C:/x/mcp-vision.js")
+    monkeypatch.setattr(install, "run", lambda cmd, timeout=30: calls.append(cmd) or (0, ""))
+    ok = install.ensure_mcp()
+    assert ok is True
+    add = [c for c in calls if "mcp add" in " ".join(c)]
+    assert add and any("mcp_server.py" in " ".join(a) for a in add)
+
+
+def test_ensure_mcp_registers_when_absent(monkeypatch):
+    calls = []
+    registered = []
+
+    def fake_list():
+        return "vision  claude-2  python  C:/x/mcp_server.py" if registered else ""
 
     def fake_run(cmd, timeout=30):
         calls.append(cmd)
-        return 0, ""
+        if "mcp add" in " ".join(cmd):
+            registered.append(True)
+        return (0, "")
 
-    def fake_mcp_registered():
-        # 首次（calls 为空）→ False 触发注册；注册后（calls 非空）→ True
-        return bool(calls) and "mcp" in calls[0]
-
+    monkeypatch.setattr(install, "_mcp_list", fake_list)
     monkeypatch.setattr(install, "run", fake_run)
-    monkeypatch.setattr(install, "mcp_registered", fake_mcp_registered)
-    ok = install.ensure_mcp()
-    assert ok is True
-    assert "mcp_server.py" in calls[0][-1]  # 用 python server，非 node
+    assert install.ensure_mcp() is True
+    assert any("mcp add" in " ".join(c) for c in calls)
+
+
+def test_check_node_advisory(monkeypatch):
+    calls = []
+    monkeypatch.setattr(install, "run", lambda cmd, timeout=30: calls.append(cmd) or (1, ""))
+    ok = install.check_node()
+    assert ok is True  # 无 node 不阻断
 
 
 def test_register_all_dispatch(monkeypatch):
