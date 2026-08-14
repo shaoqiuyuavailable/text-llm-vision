@@ -1070,20 +1070,16 @@ def test_ensure_mcp_uses_python_server(monkeypatch, tmp_path):
     monkeypatch.setattr(mcp_hosts, "SERVER_PATH", server)
     calls = []
 
-    def fake_mcp_registered():
-        return False
-
     def fake_run(cmd, timeout=30):
         calls.append(cmd)
         return 0, ""
 
-    def fake_mcp_registered_after():
-        return True
+    def fake_mcp_registered():
+        # 首次（calls 为空）→ False 触发注册；注册后（calls 非空）→ True
+        return bool(calls) and "mcp" in calls[0]
 
-    monkeypatch.setattr(install, "mcp_registered", fake_mcp_registered)
     monkeypatch.setattr(install, "run", fake_run)
-    # 第一次注册后第二次检测成功
-    monkeypatch.setattr(install, "mcp_registered", lambda: calls and calls[0].index("mcp add") >= 0)
+    monkeypatch.setattr(install, "mcp_registered", fake_mcp_registered)
     ok = install.ensure_mcp()
     assert ok is True
     assert "mcp_server.py" in calls[0]  # 用 python server，非 node
