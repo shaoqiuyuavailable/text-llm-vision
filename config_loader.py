@@ -130,30 +130,68 @@ def get() -> dict:
     return cfg
 
 
+def cloud_key_of(c: dict) -> str:
+    """单个平台的 key：优先 <NAME>_API_KEY 环境变量，回退 config api_key。"""
+    name = (c.get("name") or "").strip().upper()
+    env = os.environ.get(f"{name}_API_KEY") if name else ""
+    if env:
+        return env
+    return c.get("api_key", "") or ""
+
+
+def active_cloud() -> dict | None:
+    """当前激活云平台：cloud.active 匹配；未指定 active 时取第一个有 key 的平台。"""
+    cloud_cfg = get().get("cloud", {})
+    active = cloud_cfg.get("active", "")
+    clouds = cloud_cfg.get("clouds", []) or []
+    if not clouds:
+        return None
+    if active:
+        for c in clouds:
+            if c.get("name") == active:
+                return c
+        return None
+    for c in clouds:
+        if cloud_key_of(c):
+            return c
+    return None
+
+
+def cloud_key() -> str:
+    """当前激活平台的 API key（供 use_cloud 判断）。"""
+    c = active_cloud()
+    return cloud_key_of(c) if c else ""
+
+
+def use_cloud() -> bool:
+    """是否走云端：VISION_PROVIDER 强制 local/cloud；否则任一平台有 key 即云端。"""
+    provider = os.environ.get("VISION_PROVIDER", "").strip()
+    if provider == "local":
+        return False
+    if provider == "cloud":
+        return True
+    return bool(cloud_key())
+
+
 def resolve_backend() -> dict:
-    """归一化后端信息（env > config > 默认），供 MCP server 调试/选后端。
+    """归一化后端信息（env > config > 默认），供 mcp_server 调试/选后端。
 
     返回 {provider, active, model, url, api_key, base_url, precision}；
-    provider: "local"(Ollama) 或 "cloud"（有云 key 时）。
+    provider 与 vision_client 实际路由同源（use_cloud）；model 云端时取云厂商模型。
     """
     cfg = get()
     o = cfg.get("ollama", {})
-    cloud = cfg.get("cloud", {}) or {}
-    active = cloud.get("active", "")
-    api_key = os.environ.get("VISION_API_KEY", "").strip()
-    base_url = os.environ.get("VISION_API_BASE_URL", "").strip()
-    if not api_key:
-        for c in cloud.get("clouds", []) or []:
-            if c.get("name") == active:
-                api_key = c.get("api_key", "") or ""
-                base_url = c.get("base_url", "") or ""
-    provider = os.environ.get("VISION_PROVIDER", "").strip() or ("cloud" if api_key else "local")
+    ac = active_cloud()
+    provider = "cloud" if use_cloud() else "local"
+    model = o.get("model", "")
+    if provider == "cloud" and ac:
+        model = ac.get("model") or model
     return {
         "provider": provider,
-        "active": active,
-        "model": o.get("model", ""),
+        "active": (ac or {}).get("name", ""),
+        "model": model,
         "url": o.get("url", ""),
-        "api_key": api_key,
-        "base_url": base_url,
+        "api_key": cloud_key(),
+        "base_url": (ac or {}).get("base_url", ""),
         "precision": o.get("precision", "fast"),
     }

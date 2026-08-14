@@ -62,6 +62,59 @@ def test_resolve_backend_local(monkeypatch, tmp_path):
 def test_resolve_backend_cloud_env(monkeypatch, tmp_path):
     _fresh(monkeypatch, tmp_path)
     monkeypatch.setenv("VISION_API_KEY", "sk-test")
+    monkeypatch.setenv("VISION_API_BASE_URL", "https://api.example.com/v1")
     b = config_loader.resolve_backend()
     assert b["provider"] == "cloud"
     assert b["api_key"] == "sk-test"
+
+
+def test_active_cloud_falls_back_to_first_with_key(monkeypatch, tmp_path):
+    _fresh(monkeypatch, tmp_path)
+    import json
+    conf = tmp_path / "config.json"
+    conf.write_text(json.dumps({"cloud": {"active": "",
+        "clouds": [{"name": "a", "base_url": "https://a", "model": "m", "api_key": ""},
+                   {"name": "b", "base_url": "https://b", "model": "m", "api_key": "bkey"}]}}),
+        encoding="utf-8")
+    monkeypatch.setattr(config_loader, "CONFIG_PATH", str(conf))
+    monkeypatch.delenv("A_API_KEY", raising=False)
+    monkeypatch.delenv("B_API_KEY", raising=False)
+    c = config_loader.active_cloud()
+    assert c is not None and c.get("name") == "b"
+
+
+def test_cloud_key_env_name_support(monkeypatch, tmp_path):
+    _fresh(monkeypatch, tmp_path)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-env")
+    assert config_loader.cloud_key_of({"name": "dashscope", "api_key": ""}) == "sk-env"
+    assert config_loader.cloud_key_of({"name": "dashscope", "api_key": "cfg"}) == "sk-env"
+    monkeypatch.delenv("DASHSCOPE_API_KEY")
+    assert config_loader.cloud_key_of({"name": "dashscope", "api_key": "cfg"}) == "cfg"
+
+
+def test_use_cloud_provider_force(monkeypatch, tmp_path):
+    _fresh(monkeypatch, tmp_path)
+    monkeypatch.setenv("VISION_API_KEY", "k")
+    monkeypatch.setenv("VISION_API_BASE_URL", "https://b")
+    assert config_loader.use_cloud() is True
+    monkeypatch.setenv("VISION_PROVIDER", "local")
+    assert config_loader.use_cloud() is False
+    monkeypatch.setenv("VISION_PROVIDER", "cloud")
+    assert config_loader.use_cloud() is True
+
+
+def test_resolve_backend_model_cloud(monkeypatch, tmp_path):
+    _fresh(monkeypatch, tmp_path)
+    monkeypatch.setenv("VISION_API_KEY", "k")
+    monkeypatch.setenv("VISION_API_BASE_URL", "https://b")
+    monkeypatch.setenv("VISION_MODEL", "qwen-vl-plus")
+    b = config_loader.resolve_backend()
+    assert b["provider"] == "cloud"
+    assert b["model"] == "qwen-vl-plus"  # 云时取云模型，非 ollama.model
+    monkeypatch.delenv("VISION_API_KEY")
+    monkeypatch.delenv("VISION_API_BASE_URL")
+    monkeypatch.delenv("VISION_MODEL")
+    monkeypatch.delenv("VISION_PROVIDER", raising=False)
+    b2 = config_loader.resolve_backend()
+    assert b2["provider"] == "local"
+    assert b2["model"] == "qwen2.5vl"

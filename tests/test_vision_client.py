@@ -38,13 +38,14 @@ def test_compare_three_calls(monkeypatch):
 
 
 def test_use_cloud_provider_override(monkeypatch):
-    monkeypatch.setattr(vision_client, "_cloud_key", lambda: "sk")
+    import config_loader
+    monkeypatch.setattr(config_loader, "cloud_key", lambda: "sk")
     monkeypatch.delenv("VISION_PROVIDER", raising=False)
     assert vision_client._use_cloud() is True
     monkeypatch.setenv("VISION_PROVIDER", "local")
     assert vision_client._use_cloud() is False
     monkeypatch.setenv("VISION_PROVIDER", "cloud")
     assert vision_client._use_cloud() is True
-    monkeypatch.setattr(vision_client, "_cloud_key", lambda: "")
+    monkeypatch.setattr(config_loader, "cloud_key", lambda: "")
     monkeypatch.delenv("VISION_PROVIDER", raising=False)
     assert vision_client._use_cloud() is False

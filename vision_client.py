@@ -66,47 +66,19 @@ def _clouds() -> list:
 
 
 def _active_cloud() -> dict | None:
-    """按 cloud.active 选当前平台；未指定 active 时取第一个有 key 的。"""
-    cloud_cfg = config_loader.get().get("cloud", {})
-    active = cloud_cfg.get("active", "")
-    clouds = _clouds()
-    if not clouds:
-        return None
-    if active:
-        for c in clouds:
-            if c.get("name") == active:
-                return c
-        return None  # active 指定的平台不存在
-    # 未指定 active：取第一个配了 key 的（key 从环境变量或 config 读）
-    for c in clouds:
-        if _cloud_key_of(c):
-            return c
-    return None
+    return config_loader.active_cloud()
 
 
 def _cloud_key_of(c: dict) -> str:
-    """单个平台的 key：优先环境变量（name 大写 + _API_KEY），回退 config 的 api_key。"""
-    name = (c.get("name") or "").strip().upper()
-    env = os.environ.get(f"{name}_API_KEY") if name else ""
-    if env:
-        return env
-    return c.get("api_key", "") or ""
+    return config_loader.cloud_key_of(c)
 
 
 def _cloud_key() -> str:
-    """当前激活平台的 API key（供 use_cloud 判断：任一平台有 key 即走云端）。"""
-    c = _active_cloud()
-    return _cloud_key_of(c) if c else ""
+    return config_loader.cloud_key()
 
 
 def _use_cloud() -> bool:
-    """是否走云端：任一平台有 key 默认云端；VISION_PROVIDER 可强制 local/cloud。"""
-    provider = os.environ.get("VISION_PROVIDER", "").strip()
-    if provider == "local":
-        return False
-    if provider == "cloud":
-        return True
-    return bool(_cloud_key())
+    return config_loader.use_cloud()
 
 
 def _post_cloud(b64: str, prompt: str, temperature: float) -> str:
