@@ -181,3 +181,59 @@ def test_analyze_unknown_scene_appends_conclusion(monkeypatch):
     monkeypatch.setattr(vision_client, "guess", lambda *a, **k: "推测")
     out = vision_client.analyze("/tmp/x.png", "deep")
     assert "无法归类" in out
+
+
+# ---- 视觉路由器 v1：路由表查表 / 引擎分发 / 回退 ----
+
+def _router_table():
+    return {"document.chat": "ocr", "document.code": "ocr", "_default": "vlm"}
+
+
+def test_route_engine_lookup(monkeypatch):
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: {"router": _router_table()})
+    assert vision_client._route_engine("document", "chat") == "ocr"
+    assert vision_client._route_engine("document", "report") == "vlm"  # 无精确项 → _default
+    assert vision_client._route_engine("table", "") == "vlm"
+    assert vision_client._route_engine("unknown", "") == "vlm"
+
+
+def test_analyze_document_chat_routes_to_ocr(monkeypatch):
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("文档", "document", "chat"))
+    monkeypatch.setattr(vision_client, "ocr", lambda p: "这是OCR提取的文字内容示例，超过二十个字符。")
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: "不应走 zoom")
+    monkeypatch.setattr(vision_client, "guess", lambda *a, **k: "推测")
+    out = vision_client.analyze("/tmp/x.png", "standard")
+    assert "OCR" in out and "不应走 zoom" not in out
+
+
+def test_analyze_table_routes_to_vlm(monkeypatch):
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("表格", "table", ""))
+    monkeypatch.setattr(vision_client, "ocr", lambda p: "不应走 OCR")
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: "表格VLM细节")
+    out = vision_client.analyze("/tmp/x.png", "standard")
+    assert "表格VLM细节" in out and "不应走 OCR" not in out
+
+
+def test_analyze_unregistered_engine_falls_back_to_vlm(monkeypatch):
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("图", "table", ""))
+    monkeypatch.setattr(vision_client, "_route_engine", lambda s, sb: "rapidtable")  # 未注册引擎
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: "回退VLM细节")
+    out = vision_client.analyze("/tmp/x.png", "standard")
+    assert "回退VLM细节" in out  # 未注册 → 回退 vlm，不报错
+
+
+def test_analyze_ocr_empty_falls_back_to_vlm(monkeypatch):
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("文档", "document", "chat"))
+    monkeypatch.setattr(vision_client, "ocr", lambda p: "")  # OCR 提取不足
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: "回退VLM文档细节")
+    out = vision_client.analyze("/tmp/x.png", "standard")
+    assert "回退VLM文档细节" in out
+
+
+def test_analyze_vlm_engine_error_returns_placeholder(monkeypatch):
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("图", "table", ""))
+    monkeypatch.setattr(vision_client, "_route_engine", lambda s, sb: "vlm")
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    out = vision_client.analyze("/tmp/x.png", "standard")
+    assert "识别失败" in out or "回退" in out

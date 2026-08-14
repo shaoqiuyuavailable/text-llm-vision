@@ -346,6 +346,50 @@ def spatial(path_or_b64: str) -> str:
     return _grounding(path_or_b64, e["text"], e["temperature"])
 
 
+# ---- 视觉路由器 v1：按 scan 场景选引擎（当前 VLM 统一 qwen2.5vl，后续换专业模型只改路由表）----
+
+
+def _route_engine(scene: str, sub: str) -> str:
+    """路由表查引擎：scene.sub 精确优先 → scene 大类 → _default。"""
+    table = config_loader.get().get("router", {})
+    if f"{scene}.{sub}" in table:
+        return table[f"{scene}.{sub}"]
+    if scene in table:
+        return table[scene]
+    return table.get("_default", "vlm")
+
+
+def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str) -> str:
+    """OCR 引擎（RapidOCR）：只提取文字。提取不足返回空串 → 调用方回退 vlm。"""
+    text = ocr(path_or_b64)
+    if len(text) >= 20:
+        return f"[OCR 提取的文字（自动路由，未走视觉模型）]\n{text}"
+    return ""
+
+
+def _engine_vlm(path_or_b64: str, scene: str, sub: str, scan_desc: str) -> str:
+    """VLM 引擎（当前统一 qwen2.5vl）：走 zoom 按类提示词。"""
+    return zoom(path_or_b64, scene, sub=sub, scan_desc=scan_desc)
+
+
+# 引擎注册表：后续换专业模型 = 加函数进注册表 + 改路由表指向，analyze 不动
+_ENGINES = {
+    "ocr": _engine_ocr,
+    "vlm": _engine_vlm,
+}
+
+
+def _run_engine(engine: str, path_or_b64: str, scene: str, sub: str, scan_desc: str) -> str:
+    """调引擎：未注册 / 异常返回空串（调用方回退 vlm，不报错）。"""
+    fn = _ENGINES.get(engine)
+    if fn is None:
+        return ""
+    try:
+        return fn(path_or_b64, scene, sub, scan_desc)
+    except Exception:
+        return ""
+
+
 def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
     """按精度档位识别。统一入口，供 proxy / MCP 使用。
     - fast:     1 次 describe（单句描述）——快
@@ -362,19 +406,15 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
         # fast 也走 scan：1 次调用即含描述+类别（scan 提示词自带描述要求），供 scene 推理
         desc, scene, sub = scan(path_or_b64)
         return f"【初步判断】{desc}\n【场景】{scene}"
-    # standard / deep：先 scan 判场景，再 zoom
+    # standard / deep：先 scan 判场景，再按路由表选引擎（视觉路由器 v1）
     desc, scene, sub = scan(path_or_b64)
-    # 自动路由：纯文字场景（document.chat/code）优先用 OCR 提取文字替代视觉 zoom。
-    # 严格限定：OCR 必须提取到足够文字（≥20字符）才用，否则回退视觉 zoom（防含图/空白误判）。
-    facts = None
-    ocr_used = False
-    if scene == "document" and sub in ("chat", "code"):
-        ocr_text = ocr(path_or_b64)
-        if len(ocr_text) >= 20:
-            facts = f"[OCR 提取的文字（自动路由，未走视觉模型）]\n{ocr_text}"
-            ocr_used = True
-    if facts is None:
-        facts = zoom(path_or_b64, scene, sub=sub, scan_desc=desc)
+    # 路由：scene(.sub) → 引擎。document.chat/code → OCR；其余 → VLM(qwen2.5vl)。
+    # 引擎未注册 / 异常 / 输出不足 → 回退 vlm（沿用现有容错，不报错）。
+    engine = _route_engine(scene, sub)
+    facts = _run_engine(engine, path_or_b64, scene, sub, desc)
+    ocr_used = bool(facts and engine == "ocr")
+    if not facts:
+        facts = _run_engine("vlm", path_or_b64, scene, sub, desc) or "[识别失败（引擎异常），已回退]"
     if precision == "standard":
         tag = "[OCR]" if ocr_used else "[视觉]"
         return f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}"
