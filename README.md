@@ -432,7 +432,7 @@ python install.py --mcp claude    # 或指定单一宿主
 
 ```bash
 # 配置 OpenAI 上游（双向协议的 OpenAI 链路；Anthropic 链路走 CC Switch/config.upstream 不变）
-# 编辑 config.json 加： "upstream_openai": "https://api.example.com"
+# 编辑 config.json 加： "upstream_openai": "<你的 OpenAI 上游地址>"
 
 docker compose up -d --build          # 构建并后台启动
 curl http://localhost:8787/health     # 验活
