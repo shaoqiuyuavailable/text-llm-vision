@@ -284,17 +284,32 @@ def _image_size(path: str) -> str:
         return ""
 
 
-def locate(path_or_b64: str, query: str, precision: str = "") -> str:
-    """按 query 定位图中元素（grounding bbox）。复用 spatial 提示词注入查询。
-    返回元素名 + bbox JSON + 原图尺寸。模型不支持 grounding 时仅返回元素名列表。"""
-    e = _entry("spatial")
+def _grounding_enabled() -> bool:
+    """模型无关：config ollama.grounding 控制是否启用 grounding（换不支持 bbox 的模型时设 false 跳过）。"""
+    return config_loader.get().get("ollama", {}).get("grounding", True)
+
+
+def _grounding(path_or_b64: str, prompt: str, temperature: float) -> str:
+    """grounding 请求：计算图片尺寸 + _post_b64 + 追加【原图尺寸】。spatial()/locate() 共用。"""
     img_path = path_or_b64 if os.path.exists(path_or_b64) else ""
     size = _image_size(img_path) if img_path else ""
-    prompt = f"用户在图中查找：{query}\n\n{e['text']}"
-    text = _post_b64(_to_b64(path_or_b64), prompt, e["temperature"])
+    text = _post_b64(_to_b64(path_or_b64), prompt, temperature)
     if size:
         text += f"\n【原图尺寸】{size}"
     return text
+
+
+def locate(path_or_b64: str, query: str) -> str:
+    """按 query 定位图中元素（grounding bbox）。复用 spatial 提示词注入查询。
+    返回元素名 + bbox JSON + 原图尺寸。模型不支持 grounding 时返回明确提示。"""
+    if not _grounding_enabled():
+        return "视觉 grounding 已关闭（config ollama.grounding=false），无法输出边界框；如需定位请将 grounding 设为 true。"
+    e = _entry("spatial")
+    prompt = f"用户在图中查找：{query}\n\n{e['text']}"
+    try:
+        return _grounding(path_or_b64, prompt, e["temperature"])
+    except Exception:
+        return "定位失败（grounding 请求异常）"
 
 
 def compare(path_a: str, path_b: str, precision: str = "") -> str:
@@ -314,16 +329,9 @@ def compare(path_a: str, path_b: str, precision: str = "") -> str:
 
 
 def spatial(path_or_b64: str) -> str:
-    """空间结构识别（grounding）：输出元素名 + bbox 坐标 + 图片尺寸。
-    解决散文描述丢失空间坐标/拓扑的问题——主模型基于结构化坐标推理布局，
-    而非脑补。bbox 为模型内部网格坐标，配合原图尺寸由主模型换算相对位置。"""
+    """空间结构识别（grounding）：输出元素名 + bbox 坐标 + 图片尺寸。"""
     e = _entry("spatial")
-    img_path = path_or_b64 if os.path.exists(path_or_b64) else ""
-    size = _image_size(img_path) if img_path else ""
-    text = _post_b64(_to_b64(path_or_b64), e["text"], e["temperature"])
-    if size:
-        text += f"\n【原图尺寸】{size}"
-    return text
+    return _grounding(path_or_b64, e["text"], e["temperature"])
 
 
 def analyze(path_or_b64: str, precision: str = "") -> str:

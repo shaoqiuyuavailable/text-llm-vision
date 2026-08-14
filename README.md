@@ -239,6 +239,8 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 | **本地 Ollama**（默认） | 未配云端 key | 零费用、数据不出机器、离线可用 |
 | **云端通道** | 配置 `cloud.base_url` + 环境变量 `DASHSCOPE_API_KEY` | 识别质量更高（如 qwen-vl-plus）、更快，图出机器 |
 
+> **本地后端 = Ollama（`/api/generate` 直连）**；非 Ollama 本地（llama.cpp / vLLM 等 OpenAI 兼容）请走云端通道（配 `cloud` 厂商 `base_url` + key）。
+
 **切换规则**：`_post_b64` 检测到**任一平台**配了 key（环境变量 `<NAME>_API_KEY` 或 config 的 `api_key`）就走云端，否则回退本地——**不配 key 即纯本地，配了自动用云端**。三次判定（Scan/Zoom/Guess）、场景分层、缓存、超时等全部复用，只换底层请求。`config.json` 不入库（key 走环境变量，防泄露）。
 
 **多平台轮换**：`config.json` 的 `cloud` 块是数组：

@@ -168,7 +168,6 @@ def doctor() -> int:
     # 7. 多宿主 MCP 注册
     try:
         import mcp_hosts
-        mcp_hosts.SERVER_PATH = os.path.join(os.path.expanduser("~/.claude/vision-eyes"), "mcp_server.py")
         print("\n-- 多宿主 MCP 注册（install.py --mcp <host> 补全）--")
         for host, ok, detail in mcp_hosts.host_status():
             print(f"{'✓' if ok else '✗'}  {host}: {detail}")

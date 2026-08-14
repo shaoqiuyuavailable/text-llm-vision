@@ -2,6 +2,7 @@ import vision_client
 
 
 def test_locate_injects_query(monkeypatch):
+    monkeypatch.setattr(vision_client, "_grounding_enabled", lambda: True)
     captured = {}
 
     def fake_post(b64, prompt, temperature):
@@ -49,3 +50,20 @@ def test_use_cloud_provider_override(monkeypatch):
     monkeypatch.setattr(config_loader, "cloud_key", lambda: "")
     monkeypatch.delenv("VISION_PROVIDER", raising=False)
     assert vision_client._use_cloud() is False
+
+
+def test_locate_grounding_disabled_returns_hint(monkeypatch):
+    monkeypatch.setattr(vision_client, "_grounding_enabled", lambda: False)
+    called = []
+    monkeypatch.setattr(vision_client, "_post_b64", lambda *a, **k: called.append(1) or "x")
+    out = vision_client.locate("/tmp/x.png", "按钮")
+    assert "grounding 已关闭" in out
+    assert not called  # 未调识别
+
+
+def test_spatial_uses_grounding(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(vision_client, "_grounding_enabled", lambda: True)
+    monkeypatch.setattr(vision_client, "_grounding", lambda p, prompt, temp: captured.update(prompt=prompt) or "OK")
+    vision_client.spatial("/tmp/x.png")
+    assert "spatial" in captured.get("prompt", "") or captured.get("prompt")  # _entry("spatial") 文本

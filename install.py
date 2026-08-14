@@ -245,7 +245,6 @@ def ensure_mcp() -> bool:
 def register_mcp(host_arg: str) -> int:
     """--mcp 入口：注册到指定宿主或 all。"""
     import mcp_hosts
-    mcp_hosts.SERVER_PATH = os.path.join(TARGET, "mcp_server.py")
     if host_arg == "all":
         rows = mcp_hosts.register_all()
     else:
