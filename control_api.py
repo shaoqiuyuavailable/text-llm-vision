@@ -12,6 +12,7 @@ import time
 
 import config_loader
 import toggle
+import vision_client
 
 STATE = toggle.STATE  # ~/.claude/vision-eyes/state
 ALLOWED_CONFIG_KEYS = {"upstream", "upstream_openai", "ollama"}
@@ -82,6 +83,29 @@ def _cloud_list(cfg) -> list:
     return out
 
 
+def _scene_exec(cfg: dict) -> dict:
+    """每个场景路由的生效执行实体（面板展示用），与运行时解析一致（vision_client.analyze）：
+    - ocr 引擎 → 内置 RapidOCR（model 参数被 _engine_ocr 忽略，绝不能标成全局模型，防误导）
+    - vlm 引擎 → 显式 "engine:model" 优先；否则本地用 ollama.model、云端用 active 厂商 model
+      （与 _post_b64 的 eff_model 同规则）"""
+    router = cfg.get("router", {}) or {}
+    o = cfg.get("ollama", {}) or {}
+    use_cloud = config_loader.use_cloud()
+    ac = config_loader.active_cloud() if use_cloud else None
+    local_default = o.get("model", "") or "(未配 ollama.model)"
+    cloud_default = (ac or {}).get("model", "") or "(active 厂商未配 model)"
+    out = {}
+    for scene, value in router.items():
+        engine, model = vision_client._parse_route_value(value)
+        if engine == "ocr":
+            out[scene] = "RapidOCR(内置)"
+        elif model:
+            out[scene] = model
+        else:
+            out[scene] = cloud_default if use_cloud else local_default
+    return out
+
+
 def get_status(proxy_info=None) -> dict:
     """合并状态：档位/后端/端口/上游/ollama 配置/云端厂商/proxy 健康/ollama 服务。"""
     cfg = config_loader.get()
@@ -105,6 +129,7 @@ def get_status(proxy_info=None) -> dict:
         "cloud": _cloud_list(cfg),
         "router": cfg.get("router", {}),   # 生效路由表（基线 + config 覆盖），供面板交互
         "models": cfg.get("models", {}),   # 生效模型注册表
+        "scene_exec": _scene_exec(cfg),    # 每场景生效执行实体（ocr→RapidOCR / vlm→实际模型），面板展示
         "proxy": proxy_info,
         "ollama_service": _ollama_service(),
     }

@@ -2,7 +2,7 @@
   "name": "text-llm-vision",
   "displayName": "text-llm-vision",
   "description": "text-llm-vision 可视化控制台：动态展示并修改档位/后端/端口/温度/上游配置",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "shaoqiuyuavailable",
   "license": "MIT",
   "repository": {

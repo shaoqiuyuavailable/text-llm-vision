@@ -173,8 +173,11 @@ class VisionTreeProvider {
         'model', m.purpose || '点击操作', { kind: 'modelManage', model: name }));
     }
     items.push(new VisionTreeItem('场景映射（router）· 点击改绑', 'header', ''));
+    // 每场景显示生效执行实体（来自 /api/status scene_exec）：ocr → RapidOCR(内置)；vlm → 实际模型
+    const execMap = d.scene_exec || {};
     for (const [scene, val] of Object.entries(router)) {
-      items.push(new VisionTreeItem(`  ${scene}: ${val}`, 'routerScene', '点击改绑', { kind: 'routerScene', scene, value: val }));
+      const ex = execMap[scene];
+      items.push(new VisionTreeItem(`  ${scene}: ${val}${ex ? ` · ${ex}` : ''}`, 'routerScene', '点击改绑', { kind: 'routerScene', scene, value: val }));
     }
     items.push(new VisionTreeItem(`代理: ${d.proxy && d.proxy.status === 'ok' ? '运行中' : '?'} v${(d.proxy && d.proxy.version) || '?'} · pid ${(d.proxy && d.proxy.pid) || '?'}`, 'info', ''));
     items.push(new VisionTreeItem(`ollama: ${d.ollama_service && d.ollama_service.running ? '运行中 ' + (d.ollama_service.model || '') : '未运行'}`, 'info', ''));

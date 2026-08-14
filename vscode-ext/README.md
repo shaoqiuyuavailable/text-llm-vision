@@ -36,7 +36,12 @@ code --install-extension text-llm-vision-*.vsix
 | 温度 / top_p | 输入数值 | `POST /api/config` |
 | 上游: … | 输入地址 | `POST /api/config` |
 | 云端厂商 | 点厂商切换 | `POST /api/backend` |
+| **＋ 添加模型** | 输入模型名/类型/用途，可选下载 | `toggle.py model add` |
+| 模型: name (type) | 下载 / 逻辑删 / 物理删 (`ollama rm`) / 替换 | `toggle.py model download\|rm\|replace` |
+| 场景映射: scene: engine · 执行器 | 输入 `engine:model` 改绑（模型须已注册） | 写 config.json `router[scene]` |
 | 代理 / ollama | 只读状态 | `GET /api/status` |
+
+> 场景行显示**生效执行实体**（`GET /api/status` `scene_exec`）：`ocr` → 内置 RapidOCR；`vlm` → 实际模型（显式 `engine:model` 优先，否则本地 `ollama.model` / 云端 active 厂商 model）。
 
 代理未运行时显示「⚠ 代理未运行」+「▶ 启动代理」节点（spawn 启动 `start_proxy.py`，不弹 cmd 窗口）。
 
