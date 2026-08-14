@@ -283,6 +283,8 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 ## 环境与部署
 
+> **🚀 从零开始（干净机器）**：直接看 [QUICKSTART.md](QUICKSTART.md)——前置 → 一分钟跑起来 → 迁移/升级 → 使用 → 诊断 → 常见问题，全流程一条龙。
+
 ### 前置环境
 
 | 依赖 | 版本 | 用途 |
