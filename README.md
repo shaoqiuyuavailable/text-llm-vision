@@ -494,6 +494,17 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `status.bat` | 状态栏（显示档位）|
 | `test_proxy.py` | 代理端到端测试（读配置端口） |
 
+## 许可证
+
+**text-llm-vision 自定义开源协议（个人/内部免费 · 商业需授权）**，详见 [LICENSE](LICENSE)。
+
+- **免费**：个人学习/研究、公司或组织**内部自用**（不对外盈利）
+- **商业需授权**：对外盈利（作为产品或服务出售、集成进收费产品、托管付费服务等）
+- 判断原则：**是否对外盈利**——内部自用免费，对外卖钱需授权
+- 覆盖全部组件：`proxy.py`、`mcp-vision.js`、`vscode-ext/`、Docker 镜像、CLI 工具
+
+商业授权联系：GitHub Issues。
+
 ## 附：CLAUDE.md 看图规范
 
 > **为什么用软规则 + 为什么增强**：本项目无法在代理层强制拦截 Read 图片（VS Code 扩展的工具执行层绕过 hook，见「已知限制」第 1 条），路由控制权只能靠 CLAUDE.md 的 Prompt 引导。增强后的软规则把「绝对不要用 Read 读图片」从「建议」提升为「强制 + 失败路径识别」（Read 拿到 `[Unsupported Image]` 后必须改用 `describe_image`）。**这是软约束，第三方模型仍可能无视**——属已知限制（见「已知限制」第 5 条），但增强版能显著降低失效概率。
