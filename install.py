@@ -19,11 +19,12 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 import urllib.request
 
 import config_loader
+import mcp_hosts
+import _proc
 
 TARGET = os.path.expanduser("~/.claude/vision-eyes")   # 部署目标目录
 SETTINGS = os.path.expanduser("~/.claude/settings.json")
@@ -34,15 +35,15 @@ STATE_DIR = os.path.expanduser("~/.claude/vision-eyes/state")
 BAK = os.path.join(STATE_DIR, "settings.json.bak.vision")  # BASE_URL 改动前备份
 SRC = os.path.dirname(os.path.abspath(__file__))           # 本文件所在目录（项目源）
 PORT = config_loader.get_port()
-VISION_MODEL = "qwen2.5vl"
 PIP_DEPS = ["fastapi", "uvicorn", "httpx"]
 
 # 部署需要的文件清单（拷贝时排除 __pycache__/.git/日志/state/用户 config）
 NEEDED_FILES = [
     "proxy.py", "config_loader.py", "control_api.py", "prompts.py", "vision_client.py",
-    "mcp-vision.js", "identify.py", "batch_identify.py", "collect_images.py",
+    "mcp-vision.js", "mcp_server.py", "mcp_hosts.py",
+    "identify.py", "batch_identify.py", "collect_images.py",
     "scan_one.py", "read_port.py", "toggle.py", "start_proxy.py",
-    "start-proxy.bat", "status.bat", "requirements.txt", "install.py", "README.md",
+    "start-proxy.bat", "status.bat", "requirements.txt", "install.py", "_proc.py", "README.md",
 ]
 
 CLAUDE_MD_GUIDE = """\n# 视觉能力使用规范\n\n看图时必须走本地视觉工具，**不能直接用 Read 读图片**（会返回 `[Unsupported Image]`）。\n\n## 看图规范（强制）\n\n1. **需要查看图片内容时，调用 MCP 工具 `describe_image`**（传图片绝对路径），它会用本地视觉模型识别后返回文字描述。\n2. **绝对不要用 Read 工具读图片文件**——Read 读图片只会得到 `[Unsupported Image]`，是**已知的失败路径**。如果尝试 Read 图片后拿到 `[Unsupported Image]`，立刻改用 `describe_image`。\n3. **判断图片路径的标准**：文件扩展名是 `.jpg/.jpeg/.png/.webp/.gif/.bmp` 的就是图片，必须走 `describe_image`；只有非图片文本文件才用 Read。\n4. 如果用户粘贴了图片，代理已自动把图片转成文字描述进入上下文，无需额外处理。\n"""
@@ -64,28 +65,8 @@ argument-hint: 0-3|local|cloud|help
 # ---------- 工具 ----------
 
 def run(cmd, timeout=30):
-    """执行命令，返回 (returncode, stdout)。失败不抛。
-
-    Windows 上 npm 安装的 claude 是 .cmd 批处理，list 形式直接执行报
-    FileNotFoundError（WinError 2），回退经 `cmd /c` 解析。
-    Windows 加 CREATE_NO_WINDOW：父进程无控制台时子进程不弹 cmd 黑窗。"""
-    kwargs = dict(capture_output=True, text=True,
-                  timeout=timeout, encoding="utf-8", errors="replace")
-    if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-    try:
-        p = subprocess.run(cmd, **kwargs)
-        return p.returncode, (p.stdout or "") + (p.stderr or "")
-    except FileNotFoundError:
-        if os.name == "nt":
-            try:
-                p = subprocess.run(["cmd", "/c", *cmd], **kwargs)
-                return p.returncode, (p.stdout or "") + (p.stderr or "")
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
-        return 127, f"command not found: {cmd[0]}"
-    except subprocess.TimeoutExpired:
-        return 124, "timeout"
+    """执行命令，返回 (returncode, stdout)。失败不抛。委托 _proc.run_cmd。"""
+    return _proc.run_cmd(cmd, timeout)
 
 
 def read_settings():
@@ -154,11 +135,11 @@ def _importable(mod: str) -> bool:
 
 def check_node() -> bool:
     code, out = run(["node", "--version"])
-    ok = code == 0
-    mark(ok, f"Node.js ≥18 ({out.strip() if ok else '未安装'})")
-    if not ok:
-        print("   → 安装 Node.js ≥18（MCP server 运行环境）")
-    return ok
+    if code == 0:
+        mark(True, f"Node.js {out.strip()}（仅旧 mcp-vision.js 需要；新 Python MCP server 无需）")
+    else:
+        print("提示: 未检测到 Node.js（仅旧 mcp-vision.js 路径需要，新 mcp_server.py 纯 Python 无需）")
+    return True
 
 
 def check_ollama(auto=False) -> bool:
@@ -168,6 +149,7 @@ def check_ollama(auto=False) -> bool:
     if not ok:
         print("   → 安装: winget install Ollama.Ollama，然后重开终端")
         return False
+    model = config_loader.get().get("ollama", {}).get("model") or "qwen2.5vl"
     # 运行中？ollama list 能连上服务才算
     code, out = run(["ollama", "list"])
     ok_run = code == 0
@@ -176,15 +158,15 @@ def check_ollama(auto=False) -> bool:
         print("   → 启动 Ollama（桌面应用或 `ollama serve`），再重跑")
         return False
     # 模型
-    has_model = VISION_MODEL in out
-    mark(has_model, f"视觉模型 {VISION_MODEL}（ollama list）")
+    has_model = model in out
+    mark(has_model, f"视觉模型 {model}（ollama list）")
     if not has_model:
         if auto:
             print(f"   → 拉取中（约 6GB，耗时看网速）…")
-            code, o = run(["ollama", "pull", VISION_MODEL], timeout=600)
-            mark(code == 0, f"ollama pull {VISION_MODEL}")
+            code, o = run(["ollama", "pull", model], timeout=600)
+            mark(code == 0, f"ollama pull {model}")
             return code == 0
-        print(f"   → 修复: ollama pull {VISION_MODEL}（或 install.py --auto）")
+        print(f"   → 修复: ollama pull {model}（或 install.py --auto）")
         return False
     return True
 
@@ -235,26 +217,41 @@ def ensure_config() -> bool:
     return False
 
 
-def mcp_registered() -> bool:
+def _mcp_list() -> str:
     code, out = run(["claude", "mcp", "list"], timeout=20)
-    return code == 0 and "vision" in out
+    return out if code == 0 else ""
 
 
 def ensure_mcp() -> bool:
-    if mcp_registered():
-        mark(True, "MCP server `vision` 已注册")
-        return True
-    node_js = os.path.join(TARGET, "mcp-vision.js")
-    cmd = ["claude", "mcp", "add", "--scope", "user", "vision",
-           "-e", f"VISION_IDENTIFY_URL=http://127.0.0.1:{PORT}",
-           "--", "node", f'"{node_js}"']
-    code, out = run(cmd, timeout=30)
-    ok = code == 0 and mcp_registered()
-    mark(ok, "注册 MCP server `vision`")
+    out = _mcp_list()
+    if "vision" in out:
+        if "mcp_server.py" in out:
+            mark(True, "MCP server `vision` 已注册（mcp_server.py）")
+            return True
+        if "mcp-vision.js" in out:
+            print("⚠ 检测到旧 Node server（mcp-vision.js），覆盖为 mcp_server.py…")
+        else:
+            mark(True, "MCP server `vision` 已注册（非本脚本 command，保留）")
+            return True
+    server = os.path.join(TARGET, "mcp_server.py")
+    code, _ = mcp_hosts.claude_mcp_upsert(server)
+    ok = code == 0 and "mcp_server.py" in _mcp_list()
+    mark(ok, "注册 MCP server `vision`（mcp_server.py）")
     if not ok:
-        print("   → 修复: claude mcp add --scope user vision "
-              f"-e VISION_IDENTIFY_URL=http://127.0.0.1:{PORT} -- node \"{node_js}\"")
+        print(f"   → 修复: claude mcp add --scope user vision -- {sys.executable} \"{server}\"")
     return ok
+
+
+def register_mcp(host_arg: str) -> int:
+    """--mcp 入口：注册到指定宿主或 all。"""
+    import mcp_hosts
+    if host_arg == "all":
+        rows = mcp_hosts.register_all()
+    else:
+        rows = mcp_hosts.register_host(host_arg)
+    for r in rows:
+        print(r)
+    return 0
 
 
 def ensure_hook() -> bool:
@@ -383,9 +380,13 @@ def main() -> int:
     ap.add_argument("--auto", action="store_true", help="自动装 pip 依赖 + ollama pull 模型")
     ap.add_argument("--point-proxy", action="store_true", help="设置 ANTHROPIC_BASE_URL 指向代理（备份）")
     ap.add_argument("--rollback", action="store_true", help="恢复 ANTHROPIC_BASE_URL")
+    ap.add_argument("--mcp", metavar="HOST", default="",
+                    help="注册 MCP 到宿主: claude|codex|opencode|cline|continue|copilot|cursor|all")
     args = ap.parse_args()
 
     print(f"== text-llm-vision 部署器（端口 :{PORT}）==")
+    if args.mcp:
+        return register_mcp(args.mcp)
     if args.point_proxy:
         return point_proxy()
     if args.rollback:

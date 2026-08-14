@@ -1,12 +1,12 @@
 import subprocess, sys, os, json
+import _proc
+import config_loader
 
 # 档位定义：0=off 1=fast 2=standard 3=deep
 # on/off 向后兼容：on→1(fast), off→0
 STATE = os.path.expanduser("~/.claude/vision-eyes/state")
 CONFIG = os.path.expanduser("~/.claude/vision-eyes/config.json")
 NAMES = {0: "OFF", 1: "fast", 2: "standard", 3: "deep"}
-# off 时主动卸载的模型（从 config 读或默认 qwen2.5vl）
-VISION_MODEL = "qwen2.5vl"
 
 
 def parse(arg: str) -> int:
@@ -23,13 +23,12 @@ def parse(arg: str) -> int:
 
 
 def _unload_model():
-    """off 时主动卸载视觉模型，立即释放显存（不等 keep_alive 超时）。
-    模型未驻留时 ollama stop 无害；失败不阻塞（容错）。"""
+    """off 时主动卸载视觉模型，立即释放显存（不等 keep_alive 超时）。"""
     try:
-        subprocess.run(["ollama", "stop", VISION_MODEL],
-                       timeout=30, capture_output=True)
+        model = config_loader.get().get("ollama", {}).get("model") or "qwen2.5vl"
+        subprocess.run(["ollama", "stop", model], timeout=30, capture_output=True)
     except Exception:
-        pass  # ollama 未装/未跑/已卸载 → 忽略
+        pass
 
 
 def _read_cfg() -> dict:
@@ -71,27 +70,13 @@ def _set_active(cfg: dict, name: str):
 
 
 def _cmd(args, timeout=20):
-    """执行命令返回 (code, out)；Windows 上 npm 的 claude 是 .cmd，回退 cmd /c。
+    """执行命令返回 (code, out)；Windows .cmd 回退 + CREATE_NO_WINDOW（见 _proc.run_cmd）。"""
+    return _proc.run_cmd(args, timeout)
 
-    Windows 且父进程无控制台（如 detached 的 uvicorn 代理）时，spawn 控制台子进程
-    会新建 cmd 黑窗——加 CREATE_NO_WINDOW 隐藏（根治「每 5 秒弹黑窗」）。"""
-    kwargs = dict(capture_output=True, text=True, timeout=timeout,
-                  encoding="utf-8", errors="replace")
-    if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-    try:
-        p = subprocess.run(args, **kwargs)
-        return p.returncode, (p.stdout or "") + (p.stderr or "")
-    except FileNotFoundError:
-        if os.name == "nt":
-            try:
-                p = subprocess.run(["cmd", "/c", *args], **kwargs)
-                return p.returncode, (p.stdout or "") + (p.stderr or "")
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
-        return 127, f"command not found: {args[0]}"
-    except subprocess.TimeoutExpired:
-        return 124, "timeout"
+
+def mark(ok, text):
+    print(f"{'✓' if ok else '✗'}  {text}")
+    return ok
 
 
 def doctor() -> int:
@@ -107,10 +92,11 @@ def doctor() -> int:
     print(f"{'✓' if ok else '✗'}  Ollama 服务" + ("" if not ok else f"（{out.strip().splitlines()[1].split()[0] if len(out.splitlines())>1 else '运行中'}）"))
     if not ok:
         print("   → 启动 Ollama（桌面应用或 `ollama serve`）后重试")
-    has_model = VISION_MODEL in out
-    print(f"{'✓' if has_model else '✗'}  视觉模型 {VISION_MODEL}")
+    model = config_loader.get().get("ollama", {}).get("model") or "qwen2.5vl"
+    has_model = model in out
+    print(f"{'✓' if has_model else '✗'}  视觉模型 {model}")
     if not has_model:
-        print(f"   → ollama pull {VISION_MODEL}")
+        print(f"   → ollama pull {model}")
 
     # 2. 代理健康
     try:
@@ -124,11 +110,16 @@ def doctor() -> int:
 
     # 3. MCP 注册
     code, out = _cmd(["claude", "mcp", "list"])
-    has = code == 0 and "vision" in out
-    print(f"{'✓' if has else '✗'}  MCP server `vision`")
-    if not has:
-        node = os.path.join(home, "vision-eyes", "mcp-vision.js")
-        print(f"   → claude mcp add --scope user vision -e VISION_IDENTIFY_URL=http://127.0.0.1:{port} -- node \"{node}\"")
+    if code == 0 and "vision" in out and "mcp_server.py" in out:
+        mark(True, "MCP server `vision`（mcp_server.py）")
+    elif code == 0 and "vision" in out:
+        mark(False, "MCP server `vision` 是旧 Node 形态（mcp-vision.js）")
+        print("   → 迁移: claude mcp add --scope user vision -- python "
+              f"\"{os.path.join(home, 'vision-eyes', 'mcp_server.py')}\"")
+    else:
+        mark(False, "MCP server `vision` 未注册")
+        print("   → 修复: claude mcp add --scope user vision -- python "
+              f"\"{os.path.join(home, 'vision-eyes', 'mcp_server.py')}\"")
 
     # 4. ANTHROPIC_BASE_URL
     cur = ""
@@ -173,6 +164,15 @@ def doctor() -> int:
     print(f"{'✓' if ok else '✗'}  /vision 命令（vision.md{' ✓' if has_vm else ' ✗'} + permissions{' ✓' if perm_ok else ' ✗'}）")
     if not ok:
         print("   → 运行 install.py 自动补齐 commands/vision.md 与 permissions.allow")
+
+    # 7. 多宿主 MCP 注册
+    try:
+        import mcp_hosts
+        print("\n-- 多宿主 MCP 注册（install.py --mcp <host> 补全）--")
+        for host, ok, detail in mcp_hosts.host_status():
+            print(f"{'✓' if ok else '✗'}  {host}: {detail}")
+    except ImportError:
+        pass  # 旧部署无 mcp_hosts.py，忽略（doctor 其余项仍有效）
 
     print()
     print("全部 ✓ → 功能就绪；有 ✗ → 按提示修复后重跑 vision doctor")

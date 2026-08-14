@@ -106,8 +106,92 @@ def get() -> dict:
         log.debug("config.json missing, using built-in defaults")  # 首次部署常见，debug 即可
     except (OSError, ValueError, json.JSONDecodeError):
         log.warning("config.json corrupt/unreadable, using built-in defaults")  # 损坏 → warning（#15）
-    # OLLAMA_URL 环境变量覆盖 ollama.url（Docker 连宿主机：host.docker.internal）
-    env_url = os.environ.get("OLLAMA_URL", "").strip()
+    # ---- env 覆盖（MCP server / Docker 直连）：env > config > 默认 ----
+    env_url = os.environ.get("OLLAMA_URL", "").strip() or os.environ.get("OLLAMA_BASE_URL", "").strip()
     if env_url:
         cfg["ollama"]["url"] = env_url
+    env_model = os.environ.get("VISION_MODEL", "").strip()
+    if env_model:
+        cfg["ollama"]["model"] = env_model
+    env_key = os.environ.get("VISION_API_KEY", "").strip()
+    env_base = os.environ.get("VISION_API_BASE_URL", "").strip()
+    if env_key and env_base:
+        # 注入合成云平台（env 驱动，需 key+base_url 成对），vision_client 经 cloud 通道走云端
+        cfg["cloud"]["clouds"] = [{
+            "name": "env",
+            "base_url": env_base,
+            "model": env_model or "qwen-vl-plus",
+            "api_key": env_key,
+        }]
+        cfg["cloud"]["active"] = "env"
+    elif env_key:
+        # 只有 key 无 base_url：不注入（避免 key 被 POST 到占位主机），保持纯本地
+        log.warning("VISION_API_KEY set but VISION_API_BASE_URL missing; staying local (env cloud requires both)")
     return cfg
+
+
+def cloud_key_of(c: dict) -> str:
+    """单个平台的 key：优先 <NAME>_API_KEY 环境变量，回退 config api_key。"""
+    name = (c.get("name") or "").strip().upper()
+    env = os.environ.get(f"{name}_API_KEY") if name else ""
+    if env:
+        return env
+    return c.get("api_key", "") or ""
+
+
+def active_cloud() -> dict | None:
+    """当前激活云平台：cloud.active 匹配；未指定 active 时取第一个有 key 的平台。"""
+    cloud_cfg = get().get("cloud", {})
+    active = cloud_cfg.get("active", "")
+    clouds = cloud_cfg.get("clouds", []) or []
+    if not clouds:
+        return None
+    if active:
+        for c in clouds:
+            if c.get("name") == active:
+                return c
+        return None
+    for c in clouds:
+        if cloud_key_of(c):
+            return c
+    return None
+
+
+def cloud_key() -> str:
+    """当前激活平台的 API key（供 use_cloud 判断）。"""
+    c = active_cloud()
+    return cloud_key_of(c) if c else ""
+
+
+def use_cloud() -> bool:
+    """是否走云端：VISION_PROVIDER 强制 local/cloud；否则任一平台有 key 即云端。"""
+    provider = os.environ.get("VISION_PROVIDER", "").strip()
+    if provider == "local":
+        return False
+    if provider == "cloud":
+        return True
+    return bool(cloud_key())
+
+
+def resolve_backend() -> dict:
+    """归一化后端信息（env > config > 默认），供 mcp_server 调试/选后端。
+
+    返回 {provider, active, model, url, api_key, base_url, precision}；
+    provider 与 vision_client 实际路由同源（use_cloud）；model 云端时取云厂商模型。
+    """
+    cfg = get()
+    o = cfg.get("ollama", {})
+    ac = active_cloud()
+    provider = "cloud" if use_cloud() else "local"
+    model = o.get("model", "")
+    if provider == "cloud" and ac:
+        model = ac.get("model") or model
+    return {
+        "provider": provider,
+        "active": (ac or {}).get("name", ""),
+        "model": model,
+        "url": o.get("url", ""),
+        "api_key": cloud_key(),
+        "base_url": (ac or {}).get("base_url", ""),
+        "precision": o.get("precision", "fast"),
+    }

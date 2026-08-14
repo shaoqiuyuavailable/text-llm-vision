@@ -60,43 +60,20 @@ def _entry(prompt_key: str) -> dict:
     return {"text": entry.get("text", ""), "temperature": temp}
 
 
-def _clouds() -> list:
-    """所有已配置的云端平台（config.cloud.clouds）。"""
-    return config_loader.get().get("cloud", {}).get("clouds", []) or []
-
-
 def _active_cloud() -> dict | None:
-    """按 cloud.active 选当前平台；未指定 active 时取第一个有 key 的。"""
-    cloud_cfg = config_loader.get().get("cloud", {})
-    active = cloud_cfg.get("active", "")
-    clouds = _clouds()
-    if not clouds:
-        return None
-    if active:
-        for c in clouds:
-            if c.get("name") == active:
-                return c
-        return None  # active 指定的平台不存在
-    # 未指定 active：取第一个配了 key 的（key 从环境变量或 config 读）
-    for c in clouds:
-        if _cloud_key_of(c):
-            return c
-    return None
+    return config_loader.active_cloud()
 
 
 def _cloud_key_of(c: dict) -> str:
-    """单个平台的 key：优先环境变量（name 大写 + _API_KEY），回退 config 的 api_key。"""
-    name = (c.get("name") or "").strip().upper()
-    env = os.environ.get(f"{name}_API_KEY") if name else ""
-    if env:
-        return env
-    return c.get("api_key", "") or ""
+    return config_loader.cloud_key_of(c)
 
 
 def _cloud_key() -> str:
-    """当前激活平台的 API key（供 use_cloud 判断：任一平台有 key 即走云端）。"""
-    c = _active_cloud()
-    return _cloud_key_of(c) if c else ""
+    return config_loader.cloud_key()
+
+
+def _use_cloud() -> bool:
+    return config_loader.use_cloud()
 
 
 def _post_cloud(b64: str, prompt: str, temperature: float) -> str:
@@ -131,7 +108,7 @@ def _post_cloud(b64: str, prompt: str, temperature: float) -> str:
 def _post_b64(b64: str, prompt: str, temperature: float) -> str:
     cfg = config_loader.get()
     o = cfg["ollama"]
-    use_cloud = bool(_cloud_key())  # 任一平台配了 key 走云端，否则纯本地
+    use_cloud = _use_cloud()  # 任一平台配了 key 走云端，否则纯本地（VISION_PROVIDER 可强制覆盖）
     # 缓存只在 deep 档(3)启用：fast/standard 收益趋近于零，deep 多次调用才值得。
     use_cache = _cache_on()
     ac = _active_cloud()
@@ -302,17 +279,54 @@ def _image_size(path: str) -> str:
         return ""
 
 
-def spatial(path_or_b64: str) -> str:
-    """空间结构识别（grounding）：输出元素名 + bbox 坐标 + 图片尺寸。
-    解决散文描述丢失空间坐标/拓扑的问题——主模型基于结构化坐标推理布局，
-    而非脑补。bbox 为模型内部网格坐标，配合原图尺寸由主模型换算相对位置。"""
-    e = _entry("spatial")
+def _grounding_enabled() -> bool:
+    """模型无关：config ollama.grounding 控制是否启用 grounding（换不支持 bbox 的模型时设 false 跳过）。"""
+    return config_loader.get().get("ollama", {}).get("grounding", True)
+
+
+def _grounding(path_or_b64: str, prompt: str, temperature: float) -> str:
+    """grounding 请求：计算图片尺寸 + _post_b64 + 追加【原图尺寸】。spatial()/locate() 共用。"""
     img_path = path_or_b64 if os.path.exists(path_or_b64) else ""
     size = _image_size(img_path) if img_path else ""
-    text = _post_b64(_to_b64(path_or_b64), e["text"], e["temperature"])
+    text = _post_b64(_to_b64(path_or_b64), prompt, temperature)
     if size:
         text += f"\n【原图尺寸】{size}"
     return text
+
+
+def locate(path_or_b64: str, query: str) -> str:
+    """按 query 定位图中元素（grounding bbox）。复用 spatial 提示词注入查询。
+    返回元素名 + bbox JSON + 原图尺寸。模型不支持 grounding 时返回明确提示。"""
+    if not _grounding_enabled():
+        return "视觉 grounding 已关闭（config ollama.grounding=false），无法输出边界框；如需定位请将 grounding 设为 true。"
+    e = _entry("spatial")
+    prompt = f"用户在图中查找：{query}\n\n{e['text']}"
+    try:
+        return _grounding(path_or_b64, prompt, e["temperature"])
+    except Exception:
+        return "定位失败（grounding 请求异常）"
+
+
+def compare(path_a: str, path_b: str, precision: str = "") -> str:
+    """双图对比：各自按精度识别，再以图A为锚、注入图B描述，调用视觉模型逐点对比。"""
+    cfg = config_loader.get()
+    temp = cfg["ollama"]["temperature"]
+    b64_a = _to_b64(path_a)
+    desc_a = analyze(path_a, precision)
+    desc_b = analyze(path_b, precision)
+    prompt = (
+        f"下面是图B的识别描述，请以当前（图A）为基础逐点对比：\n\n"
+        f"【图B描述】\n{desc_b}\n\n"
+        f"请输出：1) 图A与图B的相同点 2) 不同点（内容/布局/颜色/文字）3) 结论"
+    )
+    text = _post_b64(b64_a, prompt, temp)
+    return f"【图A】\n{desc_a}\n\n【图B】\n{desc_b}\n\n【对比】\n{text}"
+
+
+def spatial(path_or_b64: str) -> str:
+    """空间结构识别（grounding）：输出元素名 + bbox 坐标 + 图片尺寸。"""
+    e = _entry("spatial")
+    return _grounding(path_or_b64, e["text"], e["temperature"])
 
 
 def analyze(path_or_b64: str, precision: str = "") -> str:

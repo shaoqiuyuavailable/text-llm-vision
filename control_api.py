@@ -85,12 +85,11 @@ def _cloud_list(cfg) -> list:
 def get_status(proxy_info=None) -> dict:
     """合并状态：档位/后端/端口/上游/ollama 配置/云端厂商/proxy 健康/ollama 服务。"""
     cfg = config_loader.get()
-    active = (cfg.get("cloud", {}) or {}).get("active", "")
     ollama = cfg.get("ollama", {}) or {}
     return {
         "level": _read_level(),
-        "backend": "cloud" if active else "local",
-        "active_provider": active,
+        "backend": "cloud" if config_loader.use_cloud() else "local",
+        "active_provider": (config_loader.active_cloud() or {}).get("name", ""),
         "port": cfg.get("port", 8787),
         "upstream": cfg.get("upstream", ""),
         "upstream_openai": cfg.get("upstream_openai", ""),

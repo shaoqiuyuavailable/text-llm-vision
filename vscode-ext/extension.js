@@ -27,6 +27,21 @@ function readConfig() {
   return { port, baseUrl };
 }
 
+// 读 Claude Code 用户级 MCP 注册，判断 vision 是 python(mcp_server.py) 还是旧 node(mcp-vision.js)
+function readMcpStatus() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
+    const vision = (raw.mcpServers || {})['vision'];
+    if (!vision) return { state: 'none', command: '' };
+    const text = JSON.stringify(vision);
+    if (text.includes('mcp_server.py')) return { state: 'python', command: text };
+    if (text.includes('mcp-vision.js')) return { state: 'old-node', command: text };
+    return { state: 'other', command: text };
+  } catch (e) {
+    return { state: 'unknown', command: '' };
+  }
+}
+
 async function api(baseUrl, method, p, body) {
   // 全程 try/catch：任何异常都不外抛（防未捕获 rejection 崩扩展宿主→循环重启弹窗）
   let ctrl = null;
@@ -87,6 +102,21 @@ class VisionTreeProvider {
     this.status = d;
     items.push(new VisionTreeItem(`档位: ${LEVEL_NAMES[d.level] || d.level} (${d.level})`, 'level', '点击切换', { kind: 'level' }));
     items.push(new VisionTreeItem(`后端: ${d.backend}${d.active_provider ? ' (' + d.active_provider + ')' : ''}`, 'backend', '点击切换', { kind: 'backend' }));
+    // ── MCP 主路径（模型主动看图）──
+    const mcp = readMcpStatus();
+    items.push(new VisionTreeItem('── MCP 主路径 ──', 'header', ''));
+    if (mcp.state === 'python') {
+      items.push(new VisionTreeItem('MCP: mcp_server.py ✓', 'mcpOk', 'Python server（主路径）'));
+      items.push(new VisionTreeItem('工具: describe_image · extract_text · locate_object · compare_images · vision_rules', 'info', ''));
+    } else if (mcp.state === 'old-node') {
+      items.push(new VisionTreeItem('MCP: mcp-vision.js（旧 node）', 'mcpOld', '点击迁移到 mcp_server.py', { kind: 'mcpMigrate' }));
+    } else if (mcp.state === 'none') {
+      items.push(new VisionTreeItem('MCP: 未注册', 'mcpNone', '点击注册', { kind: 'mcpMigrate' }));
+    } else if (mcp.state === 'other') {
+      items.push(new VisionTreeItem('MCP: 其他 command', 'mcpOther', '非本项目脚本，保留'));
+    } else {
+      items.push(new VisionTreeItem('MCP: 无法读取 ~/.claude.json', 'info', ''));
+    }
     items.push(new VisionTreeItem(`端口: ${d.port}`, 'port', '点击修改', { kind: 'port' }));
     items.push(new VisionTreeItem(`温度: ${d.ollama && d.ollama.temperature !== undefined ? d.ollama.temperature : '-'}`, 'temp', '点击修改', { kind: 'temp' }));
     items.push(new VisionTreeItem(`top_p: ${d.ollama && d.ollama.top_p !== undefined ? d.ollama.top_p : '-'}`, 'topp', '点击修改', { kind: 'topp' }));
@@ -159,6 +189,21 @@ function activate(context) {
           case 'startProxy':
             await startProxy();
             break;
+          case 'mcpMigrate': {
+            const inst = path.join(DEPLOY_DIR(), 'install.py');
+            if (!fs.existsSync(inst)) {
+              vscode.window.showErrorMessage('未找到 install.py（先运行 install.py 部署）');
+              break;
+            }
+            const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+            const child = spawn(pythonCmd, [inst, '--mcp', 'claude'], {
+              cwd: path.dirname(inst), windowsHide: true, detached: true, stdio: 'ignore',
+            });
+            child.on('error', (err) => vscode.window.showErrorMessage('MCP 注册失败: ' + err.message));
+            child.on('exit', (code) => vscode.window.showInformationMessage(code === 0 ? 'MCP 已注册（mcp_server.py）' : `MCP 注册结束，退出码 ${code}`));
+            child.unref();
+            break;
+          }
           case 'level': {
             const pick = await vscode.window.showQuickPick(
               [{ label: 'off (0)', value: 0 }, { label: 'fast (1)', value: 1 },
