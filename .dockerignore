@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.git/
+.gitignore
+*.log
+state
+*.vsix
+vscode-ext/
+docs/
+.bash_history

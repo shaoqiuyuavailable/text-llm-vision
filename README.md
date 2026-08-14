@@ -88,6 +88,17 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 模型需要看图 → 调 describe_image(路径) → MCP → 本地 /identify → 返回文字描述
 ```
 
+### 双向协议（Anthropic + OpenAI，解除 Claude 强绑定）
+
+| 入站端点 | 上游 | 适用客户端 |
+|---|---|---|
+| `POST /v1/messages`（Anthropic） | `{upstream}`（CC Switch 按 token 反查 / config 兜底） | Claude Code |
+| `POST /v1/chat/completions`（OpenAI） | `{upstream_openai}`（config.json，默认空） | 任意 OpenAI 兼容客户端 |
+
+> **核心洞察**：代理的真正价值是 **image→text 转换**，与协议无关。OpenAI 入站解析 content 里的 `image_url`（`data:<mime>;base64,...`），**复用同一套识别逻辑**（`vision_client.analyze` + 隔离壳 + 配额/超时）转成文字，转发到 `config.upstream_openai`。**未配置 `upstream_openai` 时 OpenAI 入站返回 400 明确提示**（默认空，不绑定任何厂商）。Anthropic 链路完全不变。
+
+
+
 ## 三次判定识别（核心能力）
 
 本地识别不是「简单描述」，而是**三次判定 + 场景分层 + 温度分层**。通过视觉档位（`/vision 1/2/3`）接入主流程——代理贴图和 MCP `describe_image` 都读取档位：
@@ -331,6 +342,27 @@ claude mcp add --scope user vision -e VISION_IDENTIFY_URL=http://127.0.0.1:8787 
 - 粘贴图片 → 自动转文字
 - 让模型看本地图片 → 调用 `describe_image`
 
+### 10. Docker 部署（独立镜像，连宿主机 Ollama）
+
+把代理打包成独立镜像，暴露 8787，识别走**宿主机 Ollama**（容器内经 `host.docker.internal` 访问，需 Docker 支持该主机名——Windows Docker Desktop / Linux 需加 `--add-host=host.docker.internal:host-gateway`）。
+
+```bash
+# 配置 OpenAI 上游（双向协议的 OpenAI 链路；Anthropic 链路走 CC Switch/config.upstream 不变）
+# 编辑 config.json 加： "upstream_openai": "https://api.example.com"
+
+docker compose up -d --build          # 构建并后台启动
+curl http://localhost:8787/health     # 验活
+curl http://localhost:8787/api/status # 状态（ollama_service 走 HTTP 探测，容器内无 CLI 也能显示）
+```
+
+**docker-compose.yml 关键点**：
+- `OLLAMA_URL=http://host.docker.internal:11434/api/generate`（连宿主机 Ollama）
+- 挂载 `~/.cc-switch`（resolve_upstream 按 token 反查上游，只读）
+- 挂载 `~/.claude/vision-eyes/config.json`（**可写**，让 /api/config 改温度/上游同步到宿主）
+- 档位 state 不持久化（容器重启回默认 1，属运行时状态）
+
+> Windows 路径含空格（如 `C:\Users\shaoqiu yu`）时，compose 用 `${HOME}` 展开；异常则改完整路径。OpenAI 客户端经系统代理访问 `localhost:8787` 可能被代理劫持，需在客户端关闭 localhost 代理或设 `trust_env=false`。
+
 ## 命令行工具
 
 ```
@@ -437,7 +469,8 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `mcp-vision.js` | MCP server：describe_image 工具 |
 | `toggle.py` | 视觉控制：档位 0/1/2/3 + 后端 local[端口]/cloud[厂商]/list/doctor |
 | `install.py` | 一键部署：环境检测 + 自动配置（MCP/hook/CLAUDE.md/权限）+ 启动代理 + BASE_URL 备份回退 |
-| `vscode-ext/` | VS Code 可视化插件：侧边栏展示/修改配置（webview + extension.js + 打包脚本） |
+| `vscode-ext/` | VS Code 可视化插件：侧边栏展示/修改配置（TreeView + extension.js + 打包脚本） |
+| `Dockerfile` / `docker-compose.yml` / `.dockerignore` | Docker 独立镜像：暴露 8787，连宿主机 Ollama，挂载 CC Switch/config |
 | `start-proxy.bat` / `start_proxy.py` | 启动代理（bat 薄壳，逻辑全在 Python：读端口/验活/拉起）|
 | `read_port.py` | 输出配置端口（供 bat/脚本用） |
 | `status.bat` | 状态栏（显示档位）|

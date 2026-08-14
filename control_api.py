@@ -6,6 +6,7 @@
 既有模块级函数（不重写）。返回 dict（JSON 可序列化），不 print。
 供 proxy.py 路由调用；也可独立 import 单测。
 """
+import json
 import os
 import time
 
@@ -36,24 +37,33 @@ def _read_level() -> int:
         return 1
 
 
-def _ollama_service() -> dict:
-    """ollama 服务是否运行 + 当前已拉取模型（15s 缓存，防频繁 spawn `ollama list`）。
+def _ollama_http_probe() -> dict:
+    """HTTP 探测 ollama（GET {base}/api/tags），不依赖 ollama CLI——Docker 容器内无 CLI。
 
-    复用 toggle._cmd（Windows 上已加 CREATE_NO_WINDOW 不弹黑窗）。"""
+    从 config ollama.url（含 /api/generate）推导 base，顺带避免 spawn 子进程。"""
+    import urllib.request
+    url = (config_loader.get().get("ollama", {}) or {}).get("url", "")
+    base = url.rsplit("/api/", 1)[0] if "/api/" in url else url
+    if not base:
+        return {"running": False, "model": ""}
+    try:
+        with urllib.request.urlopen(f"{base}/api/tags", timeout=3) as r:
+            if r.status != 200:
+                return {"running": False, "model": ""}
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+            models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+            return {"running": True, "model": models[0] if models else ""}
+    except Exception:
+        return {"running": False, "model": ""}
+
+
+def _ollama_service() -> dict:
+    """ollama 服务状态（HTTP 探测 + 15s 缓存）。不 spawn 子进程，容器内也能用。"""
     global _ollama_cache
     now = time.time()
     if now - _ollama_cache["ts"] < OLLAMA_CACHE_TTL:
         return _ollama_cache["data"]
-    code, out = toggle._cmd(["ollama", "list"])
-    if code != 0:
-        result = {"running": False, "model": ""}
-    else:
-        models = []
-        for line in out.strip().splitlines()[1:]:
-            parts = line.split()
-            if parts:
-                models.append(parts[0])
-        result = {"running": True, "model": models[0] if models else ""}
+    result = _ollama_http_probe()
     _ollama_cache = {"ts": now, "data": result}
     return result
 

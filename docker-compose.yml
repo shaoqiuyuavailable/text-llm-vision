@@ -1,0 +1,18 @@
+# text-llm-vision 容器编排：连宿主机 Ollama（host.docker.internal）+ 挂载 CC Switch/config
+# Windows Docker Desktop 下 ${HOME} = C:\Users\<你>；如路径含空格有异常，改用完整路径。
+# 注意：档位 state 不持久化（容器重启回默认 1，属运行时状态）；config.json 可写（插件改配置同步到宿主）。
+services:
+  vision:
+    build: .
+    container_name: text-llm-vision
+    ports:
+      - "8787:8787"
+    environment:
+      # 容器内 localhost 是容器自己，识别必须连宿主机 Ollama
+      - OLLAMA_URL=http://host.docker.internal:11434/api/generate
+    volumes:
+      # CC Switch 数据库（resolve_upstream 按 token 反查上游，只读）
+      - "${HOME}/.cc-switch:/root/.cc-switch:ro"
+      # 配置（可写，让 /api/config 改温度/上游能同步到宿主机）
+      - "${HOME}/.claude/vision-eyes/config.json:/root/.claude/vision-eyes/config.json"
+    restart: unless-stopped

@@ -34,6 +34,10 @@ def _defaults() -> dict:
         # 上游默认地址（纯文本模型真实端点）。代理按请求头 token 反查 CC Switch
         # provider 真实上游；查不到时回退此处。解绑 DeepSeek 写死，可配任意上游。
         "upstream": "https://api.deepseek.com/anthropic",
+        # OpenAI 兼容上游基础 URL（/v1/chat/completions 由它拼接）。
+        # OpenAI 协议入站（/v1/chat/completions）走这里；Anthropic 协议走 upstream。
+        # 默认留空（不绑定任何厂商），需在 config.json 显式配置；未配置时 OpenAI 入站返回 400 提示。
+        "upstream_openai": "",
         "ollama": {
             "url": _prompts.OLLAMA,
             "model": _prompts.VISION_MODEL,
@@ -79,6 +83,8 @@ def get() -> dict:
                 cfg["port"] = data["port"]
             if "upstream" in data:
                 cfg["upstream"] = data["upstream"]
+            if "upstream_openai" in data:
+                cfg["upstream_openai"] = data["upstream_openai"]
             if isinstance(data.get("cloud"), dict):
                 cfg["cloud"].update(data["cloud"])
             if isinstance(data.get("ollama"), dict):
@@ -97,4 +103,8 @@ def get() -> dict:
         log.debug("config.json missing, using built-in defaults")  # 首次部署常见，debug 即可
     except (OSError, ValueError, json.JSONDecodeError):
         log.warning("config.json corrupt/unreadable, using built-in defaults")  # 损坏 → warning（#15）
+    # OLLAMA_URL 环境变量覆盖 ollama.url（Docker 连宿主机：host.docker.internal）
+    env_url = os.environ.get("OLLAMA_URL", "").strip()
+    if env_url:
+        cfg["ollama"]["url"] = env_url
     return cfg
