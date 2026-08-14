@@ -14,11 +14,11 @@
 | Node.js | 可选 | **仅旧 `mcp-vision.js` 需要**；新 python MCP server 零依赖，不需要 |
 
 > 云端可选手动开（DashScope/硅基流动等，配 `cloud.clouds` + key）；默认纯本地零费用。
-
+>
 > **📌 本地模型怎么选（重要）**：文档里默认 `qwen2.5vl`（8.3B / 约 6GB）**只是开箱即用的起点，不代表唯一选择**。请**根据自身需求与设备配置**挑：
 >
-> - **显存小 / 跑不动**（4-8GB）：换轻量模型，如 `qwen2.5vl:3b`、`llava:7b`、`minicpm-v`
-> - **要精度 / 显存充足**（16GB+）：换 `qwen2.5vl:13b`、`qwen2.5vl:32b`、`qwen3-vl` 等
+> - **升级**：**设备硬件支持且对识别精度有高要求** → 更换**更大的模型**，如 `qwen2.5vl:13b`、`qwen2.5vl:32b`、`qwen3-vl` 等，精度更高
+> - **降级**：**设备配置低**（显存小 / 跑不动，4-8GB）→ **降级到更小的模型**，如 `qwen2.5vl:3b`、`llava:7b`、`minicpm-v`，更省显存、更快
 > - **换法**：`ollama pull <模型名>` 拉取 → 设 `VISION_MODEL=<模型名>`（env，临时）或改 `config.json` 的 `ollama.model`（持久）
 >
 > 模型名全部走配置读取，**不硬编码**——`install.py` / `/vision` / `doctor` 都会按你选中的模型工作（FAQ 见「换模型」）。

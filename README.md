@@ -345,7 +345,7 @@ ollama pull qwen2.5vl
 ollama list        # 确认就位
 ```
 
-> **📌 本地模型怎么选**：`qwen2.5vl` 只是默认起步，**请按自身需求与设备配置挑**——显存小（4-8GB）换 `qwen2.5vl:3b` / `llava:7b` / `minicpm-v`；显存足（16GB+）要精度换 `qwen2.5vl:13b` / `qwen2.5vl:32b` / `qwen3-vl`。换法：`ollama pull <模型名>` 拉取 → 设 `VISION_MODEL=<模型名>`（env，临时）或改 `config.json` 的 `ollama.model`（持久）。模型名全走配置读取、不硬编码，`install.py` / `/vision` / `doctor` 均按所选模型工作。
+> **📌 本地模型怎么选**：`qwen2.5vl` 只是默认起步，**请按自身需求与设备配置挑**——**升级**：**设备硬件支持且对识别精度有高要求** → 更换**更大的模型**（`qwen2.5vl:13b` / `qwen2.5vl:32b` / `qwen3-vl` 等）；**降级**：**设备配置低**（显存小 / 跑不动，4-8GB）→ **降级到更小的模型**（`qwen2.5vl:3b` / `llava:7b` / `minicpm-v` 等）。换法：`ollama pull <模型名>` 拉取 → 设 `VISION_MODEL=<模型名>`（env，临时）或改 `config.json` 的 `ollama.model`（持久）。模型名全走配置读取、不硬编码，`install.py` / `/vision` / `doctor` 均按所选模型工作。
 
 > 网络受限时：Ollama 模型走 `registry.ollama.ai`，一般直连可用；若失败，配好系统代理后重启 Ollama 重试。
 
