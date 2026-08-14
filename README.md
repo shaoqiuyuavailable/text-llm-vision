@@ -4,9 +4,9 @@
 
 > **一句话定位**：不是一个简单的"视觉代理"，而是一个 **本地视觉增强引擎**——专为"纯文本模型 + 任意 AI 编码智能体"设计，用 **MCP + 代理 + 软规则三层互补架构** + **Scan/Zoom/Guess 三次判定流水线**，**三协议通用**（Anthropic / OpenAI Chat / OpenAI Responses），**Docker 可部署**，配 **VS Code 可视化控制面板**，把 8B 小模型的视觉潜力榨到极致。
 
-参考了 [glm-vision](https://github.com/shiss3/glm-vision) 的「MCP + 代理 + 软规则」三层互补架构，视觉后端落在本地 Ollama + Qwen2.5-VL（模型可更换）。
+参考了 [glm-vision](https://github.com/shiss3/glm-vision) 的「MCP + 代理 + 软规则」三层互补架构，视觉后端落在**本地视觉模型**（默认 Qwen2.5-VL，可换任意 Ollama 视觉模型）。
 
-> **English / Keywords**: A **local vision proxy** for text-only LLMs (DeepSeek, Qwen, Kimi, GLM) used by **any AI coding agent** (Claude Code / Cline / OpenCode / Codex). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), **CLAUDE.md soft rules**. **Triple protocol**: Anthropic Messages, OpenAI Chat Completions, OpenAI Responses — decoupled from any vendor. Vision backend: **Ollama + Qwen2.5-VL** (model swappable via config) with **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, **Docker** deployable, **VS Code** control panel. Upstream decoupled: CC Switch auto-follow (Anthropic) + config `upstream_openai` (OpenAI). Similar projects: glm-vision, ds-vision-skill-plus.
+> **English / Keywords**: A **local vision proxy** for text-only LLMs (DeepSeek, Qwen, Kimi, GLM) used by **any AI coding agent** (Claude Code / Cline / OpenCode / Codex). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), **CLAUDE.md soft rules**. **Triple protocol**: Anthropic Messages, OpenAI Chat Completions, OpenAI Responses — decoupled from any vendor. Vision backend: **local vision model** (default Qwen2.5-VL, swappable via config) with **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, **Docker** deployable, **VS Code** control panel. Upstream decoupled: CC Switch auto-follow (Anthropic) + config `upstream_openai` (OpenAI). Similar projects: glm-vision, ds-vision-skill-plus.
 
 ## 四大差异化卖点
 
@@ -15,7 +15,7 @@
 | 🏗️ **三层互补架构** | MCP（模型主动识图）+ 反向代理（兜底粘贴图）+ CLAUDE.md 软规则（引导用对工具）。覆盖**所有**视觉场景，纯文本模型永远只收 text、不报错 |
 | 🎯 **三次判定流水线** | `Scan`（扫描判场景）→ `Zoom`（按场景聚焦细节）→ `Guess`（大胆推测），配合场景分层 + 温度分层 + OCR 自动路由，细节提取远胜竞品的"单次描述定终身" |
 | 🔌 **三协议通用（解除强绑定）** | **Anthropic**（Claude Code）+ **OpenAI Chat**（Cline / OpenCode / Aider）+ **OpenAI Responses**（Codex CLI），一个代理喂所有主流 AI 编码智能体 |
-| 🔒 **100% 本地 & 零费用** | 本地 Ollama + Qwen2.5-VL（模型可换），数据不出机器、不按次收费，适合敏感截图和内部文档 |
+| 🔒 **100% 本地 & 零费用** | 本地视觉模型（默认 Qwen2.5-VL，可换），数据不出机器、不按次收费，适合敏感截图和内部文档 |
 | 🐳 **Docker 镜像化** | 独立镜像暴露 8787，容器内连宿主机 Ollama，挂载 CC Switch / config 保留双源 |
 | 🎛️ **VS Code 可视化面板** | TreeView 侧边栏实时展示/修改档位、后端、端口、温度、上游、grounding、云端厂商 |
 
@@ -61,7 +61,7 @@
 
 ```
 模型需要看图
-  ├─ ① 主动识图 → MCP 工具 describe_image → 本地 Qwen2.5-VL 识别 → 文字描述
+  ├─ ① 主动识图 → MCP 工具 describe_image → 本地视觉模型识别 → 文字描述
   ├─ ② 软规则   → CLAUDE.md 引导模型用 describe_image（而不是 Read 图片）
   └─ ③ 兜底     → 反向代理：用户粘贴的图片，请求体里 image 块 → 转文字 → 转发给纯文本模型
 ```
@@ -80,7 +80,7 @@
 
 ```
 Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──▶ [上游动态解析]
-              ↳ 含 image 块 → 调本地 Ollama(Qwen2.5-VL) 转成文字
+              ↳ 含 image 块 → 调本地视觉模型转成文字
               ↳ 无 image 块 → 原样透传（含分类器等一切请求）
 ```
 
