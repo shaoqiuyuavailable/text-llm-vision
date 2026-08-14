@@ -72,7 +72,7 @@ def resolve_upstream(request: Request) -> str:
     except Exception:
         pass
     return config_loader.get().get("upstream", "https://api.deepseek.com/anthropic")
-PROXY_VERSION = "0.4.0"
+PROXY_VERSION = "0.5.0"
 LOG_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(LOG_DIR, "vision-proxy.log")
 LOG_KEEP_DAYS = 3  # 日志保留天数：超期自动清理
@@ -836,11 +836,13 @@ async def identify(request: Request):
                        for d in allowed_dirs if d):
                 log.warning("req=%s identify outside allowed dirs path=%r", rid, real)
                 return JSONResponse({"error": "path outside allowed dirs"}, status_code=400)
-        # 按视觉档位识别图片内容（1=fast 2=standard 3=deep）
+        # 按视觉档位识别图片内容（1=fast 2=standard 3=deep）；可选 --mode 动态温度（v2）
         lv = vision_level()
         precision = {1: "fast", 2: "standard", 3: "deep"}.get(lv, "fast")
-        desc = vision_client.analyze(real, precision)
-        log.info("req=%s identify ok path=%s precision=%s duration=%.2fs", rid, real, precision, time.time() - t0)
+        mode = body.get("mode", "") or ""
+        desc = vision_client.analyze(real, precision, mode=mode)
+        log.info("req=%s identify ok path=%s precision=%s mode=%s duration=%.2fs",
+                 rid, real, precision, mode or "-", time.time() - t0)
         return JSONResponse({"desc": desc})
     except Exception as e:
         log.error("req=%s identify error %s: %s duration=%.2fs",

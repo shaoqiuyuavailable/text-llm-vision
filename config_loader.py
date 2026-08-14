@@ -56,6 +56,7 @@ def _defaults() -> dict:
         },
         "scenes": {k: dict(v) for k, v in getattr(_prompts, "SCENES", {}).items()},
         "prompts": {k: dict(v) for k, v in _prompts.PROMPTS.items()},
+        "modes": dict(getattr(_prompts, "MODES", {})),  # --mode 动态温度表（v2）
     }
 
 
@@ -92,16 +93,24 @@ def get() -> dict:
                 cfg["cloud"].update(data["cloud"])
             if isinstance(data.get("ollama"), dict):
                 cfg["ollama"].update(data["ollama"])
-            if isinstance(data.get("scenes"), dict):
-                for k, v in data["scenes"].items():
-                    if isinstance(v, dict):
-                        cfg["scenes"][k] = {
-                            "sub": v.get("sub", []),
-                            "default_sub": v.get("default_sub", ""),
-                        }
-            if isinstance(data.get("prompts"), dict):
-                for k, v in data["prompts"].items():
-                    cfg["prompts"][k] = _normalize_entry(v)
+            # v2 门：仅当 prompts_version>=2 才叠加 scenes/prompts/modes。
+            # 旧 config（无此键=1）的 5 类提示词会压住 v2 基线，跳过高版本结构用基线。
+            pv = data.get("prompts_version", 1)
+            if not isinstance(pv, int):
+                pv = 1
+            if pv >= 2:
+                if isinstance(data.get("modes"), dict):
+                    cfg["modes"].update(data["modes"])
+                if isinstance(data.get("scenes"), dict):
+                    for k, v in data["scenes"].items():
+                        if isinstance(v, dict):
+                            cfg["scenes"][k] = {
+                                "sub": v.get("sub", []),
+                                "default_sub": v.get("default_sub", ""),
+                            }
+                if isinstance(data.get("prompts"), dict):
+                    for k, v in data["prompts"].items():
+                        cfg["prompts"][k] = _normalize_entry(v)
     except FileNotFoundError:
         log.debug("config.json missing, using built-in defaults")  # 首次部署常见，debug 即可
     except (OSError, ValueError, json.JSONDecodeError):

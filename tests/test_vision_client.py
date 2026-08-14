@@ -67,3 +67,117 @@ def test_spatial_uses_grounding(monkeypatch):
     monkeypatch.setattr(vision_client, "_grounding", lambda p, prompt, temp: captured.update(prompt=prompt) or "OK")
     vision_client.spatial("/tmp/x.png")
     assert "spatial" in captured.get("prompt", "") or captured.get("prompt")  # _entry("spatial") 文本
+
+
+# ---- v2：16 大类解析 / zoom 选型 / 动态温度 ----
+
+def _v2_scenes():
+    return {
+        "person": {"sub": ["real_single", "real_group", "anime_character"], "default_sub": "real_single"},
+        "vehicle": {"sub": ["car", "airplane"], "default_sub": "car"},
+        "document": {"sub": ["chat", "report", "code"], "default_sub": "report"},
+        "unknown": {"sub": [], "default_sub": ""},
+        "generic": {"sub": [], "default_sub": ""},
+    }
+
+
+def _v2_mains():
+    return ("person", "animal", "plant", "food", "vehicle", "machine", "architecture",
+            "document", "chart", "diagram", "map", "screenshot", "object", "meme",
+            "scene", "unknown", "generic")
+
+
+def test_parse_scene_v2_new_categories(monkeypatch):
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _v2_scenes)
+    assert vision_client._parse_scene("大类: vehicle\n小类: car") == ("vehicle", "car")
+    assert vision_client._parse_scene("大类: person\n小类: anime_character") == ("person", "anime_character")
+    assert vision_client._parse_scene("大类: unknown\n小类: 无") == ("unknown", "")
+    # 未知词 → generic 兜底
+    assert vision_client._parse_scene("这是一张截图。") == ("generic", "")
+    # animal 无 sub → 强制清空
+    monkeypatch.setattr(vision_client, "_scenes",
+                        lambda: {"animal": {"sub": [], "default_sub": ""}, **dict(_v2_scenes())})
+    monkeypatch.setattr(vision_client, "_valid_mains",
+                        lambda: ("animal", "generic") + _v2_mains())
+    assert vision_client._parse_scene("大类: animal\n小类: 无") == ("animal", "")
+
+
+def test_scan_applies_default_sub(monkeypatch):
+    monkeypatch.setattr(vision_client, "_post_b64", lambda b, p, t: "大类: vehicle\n小类: 无")
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _v2_scenes)
+    _, scene, sub = vision_client.scan("/tmp/x.png")
+    assert scene == "vehicle"
+    assert sub == "car"  # default_sub 接线
+
+
+def test_zoom_uses_new_scene_prompt(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature):
+        captured["prompt"] = prompt
+        return "OK"
+
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    vision_client.zoom("/tmp/x.png", scene="vehicle")
+    assert "交通工具" in captured["prompt"] or "zoom_vehicle" in captured["prompt"]
+
+
+def test_zoom_missing_prompt_falls_back_generic(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature):
+        captured["prompt"] = prompt
+        return "OK"
+
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    vision_client.zoom("/tmp/x.png", scene="nonexistent_scene")
+    assert "generic" in captured["prompt"]  # 缺 key → 回退 zoom_generic
+
+
+def test_mode_temperature(monkeypatch):
+    assert vision_client._mode_temperature("") is None
+    assert vision_client._mode_temperature("identity") == 0.5  # config modes 表
+    assert vision_client._mode_temperature("bogus") is None    # 未知名 → None
+
+
+def test_guess_mode_overrides_temperature(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature):
+        captured["temperature"] = temperature
+        return "推测"
+
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    vision_client.guess("/tmp/x.png", context="事实", mode="rigorous")
+    assert captured["temperature"] == 0.3
+    vision_client.guess("/tmp/x.png", context="事实")  # 无 mode → 提示词默认 0.5
+    assert captured["temperature"] == 0.5
+
+
+def test_analyze_passes_mode_to_guess(monkeypatch):
+    captured = {}
+
+    def fake_guess(path, context="", scene="", sub="", scan_desc="", mode=""):
+        captured["mode"] = mode
+        return "推测"
+
+    monkeypatch.setattr(vision_client, "guess", fake_guess)
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("描述", "generic", ""))
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: "事实")
+    out = vision_client.analyze("/tmp/x.png", "deep", mode="anime")
+    assert captured["mode"] == "anime"
+    assert "推测" in out
+
+
+def test_analyze_unknown_scene_appends_conclusion(monkeypatch):
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("描述", "unknown", ""))
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: "事实")
+    monkeypatch.setattr(vision_client, "guess", lambda *a, **k: "推测")
+    out = vision_client.analyze("/tmp/x.png", "deep")
+    assert "无法归类" in out

@@ -11,10 +11,12 @@
     python identify.py <图片路径> --zoom             # 只第2次：按场景提取事实
     python identify.py <图片路径> --guess            # 只第3次：大胆推测
     python identify.py <图片路径> --ask "自定义问题"
+    python identify.py <图片路径> --mode rigorous    # 动态温度：rigorous/identity/military/anime/open（覆盖 guess 温度）
 提示词与采样参数从 config.json 读取（缺失时回退 prompts.py 默认）。
 """
 import sys
 
+import config_loader
 import vision_client
 
 
@@ -33,6 +35,7 @@ def main():
     path = sys.argv[1]
 
     mode = "full"
+    mode_name = ""  # --mode 动态温度（v2）：rigorous/identity/military/anime/open
     forced_scene, forced_sub = None, None
     precision = ""  # 空=用 config 默认；CLI 默认 deep（深挖工具）
     args = sys.argv[2:]
@@ -42,6 +45,14 @@ def main():
         if a == "--type":
             if i + 1 < len(args):
                 forced_scene, forced_sub = _parse_forced(args[i + 1])
+                i += 2
+                continue
+        elif a == "--mode":
+            if i + 1 < len(args):
+                mode_name = args[i + 1].lower()
+                if mode_name not in config_loader.get().get("modes", {}):
+                    print(f"[warn] 未知 --mode '{mode_name}'，已回退提示词默认温度（可用: "
+                          f"{', '.join(config_loader.get().get('modes', {}))}）", file=sys.stderr)
                 i += 2
                 continue
         elif a == "--precision":
@@ -83,13 +94,13 @@ def main():
         print(f"[zoom_{scene}" + (f".{sub}" if sub else "") + " 事实]")
         print(facts)
         print("\n[guess 推测]")
-        print(vision_client.guess(path, context=facts, scene=scene, sub=sub, scan_desc=desc))
+        print(vision_client.guess(path, context=facts, scene=scene, sub=sub, scan_desc=desc, mode=mode_name))
         return 0
 
     # 默认 full：走 analyze 统一入口（含 spatial），precision 默认 deep
     if not precision:
         precision = "deep"  # CLI 是深挖工具，默认完整三次+空间结构
-    result = vision_client.analyze(path, precision)
+    result = vision_client.analyze(path, precision, mode=mode_name)
     print(result)
     return 0
 

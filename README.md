@@ -27,7 +27,7 @@
 
 | 工具 | 用途 | 关键参数 |
 |------|------|---------|
-| `describe_image` | 识别图片，返回文字描述（Scan→Zoom→Guess 三阶段） | `image`（路径），`prompt`（可选） |
+| `describe_image` | 识别图片，返回文字描述（Scan→Zoom→Guess 三阶段） | `image`（路径），`prompt` / `mode`（可选） |
 | `extract_text` | 提取图片全部文字（OCR 优先，回退视觉模型） | `image` |
 | `locate_object` | 定位图中元素，返回元素名 + 边界框坐标（grounding bbox） | `image` + `query` |
 | `compare_images` | 对比两张图，逐点列出异同 | `image_a` + `image_b` |
@@ -225,24 +225,49 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 >
 > **模型无关（可更换视觉模型）**：识别模型完全由 `config.json` 的 `ollama.model`（本地）或 `cloud.xxx.model`（云端）决定，换模型改配置即可。`scan/zoom/guess` 提示词通用；**`grounding`（空间结构）通过 `ollama.grounding` 开关控制**（默认 `true`）——换不支持边界框定位的模型时设 `false`，deep 档自动跳过 spatial（提示词已通用化，不再绑定 Qwen 格式）。
 
-**场景分层**（5 大类 × 小类）：
+**场景分层**（v2：16 大类 × 小类，generic 仅纯兜底）：
 
 | 大类 | 小类 |
 |------|------|
-| person | anime / real / group |
-| animal | — |
-| document | chat / report / code / form / table |
-| chart | line（折线）/ bar（柱状）/ pie（饼图）/ scatter（散点）/ map（地图）|
-| generic | screenshot / landscape / object / meme |
+| person | real_single / real_group / anime_character / game_character / cosplay / statue / painting / unknown |
+| animal | mammal / bird / reptile / amphibian / fish / insect / unknown |
+| plant | flower / tree / fruit / vegetable / succulent / garden / unknown |
+| food | dish / beverage / snack / ingredient / dessert / tableware / unknown |
+| vehicle | car / motorcycle / truck / bus / train / airplane / ship / bicycle / unknown |
+| machine | industrial / household / electronics / tool / construction / unknown |
+| architecture | building / interior / landmark / bridge / ruins / unknown |
+| document | chat / report / code / form / table / email / unknown |
+| chart | line / bar / pie / scatter / radar / heatmap / unknown |
+| diagram | flowchart / org_chart / network / sequence / gantt / venn / unknown |
+| map | road / satellite / floor_plan / topographic / subway / world / unknown |
+| screenshot | software_ui / website / chat / terminal / error / settings / unknown |
+| object | product / tool / clothing / furniture / book / toy / unknown |
+| meme | template / text_overlay / reaction / caption / unknown |
+| scene | landscape / cityscape / indoor / nature / sky / weather / unknown |
+| unknown | —（显式判定无法分类） |
+| generic | —（纯兜底，sub 清空） |
 
 **温度分层**（每个提示词独立温度）：
 
 | 提示词 | 温度 | 理由 |
 |--------|------|------|
-| scan | 0.3 | 描述稳定 |
+| scan | 0.15 | 类别判定要稳（v2 建议 0.1~0.2） |
 | zoom_document | 0.2 | 原文摘录要准 |
 | zoom 其它 | 0.3 | 事实提取 |
 | guess | 0.5 | 推测敢猜 |
+| spatial | 0.0 | 坐标要准（v2 建议 0） |
+
+**动态温度（`--mode`，v2）**：按识别用途覆盖 **guess** 温度，表在 `config.json` 顶层 `modes`：
+
+| 模式 | 温度 | 适用 |
+|------|------|------|
+| rigorous | 0.3 | 严谨图片标注 |
+| identity | 0.5 | 人物/物体身份猜测 |
+| military | 0.6 | 军事装备型号识别 |
+| anime | 0.7 | 艺术作品/二次元角色猜测 |
+| open | 0.8 | 开放式图像理解 |
+
+用法：`python identify.py <图> --mode identity`；`/identify` 接口 body 加 `"mode"`；MCP `describe_image` 加 `mode` 参数。
 
 **混合方案**：大类精调 + zoom 内「组合分支」兜底跨界（代码/表格/界面/地图/证件/表情包在任一 zoom 内都能被捕获）。
 
@@ -320,6 +345,8 @@ python install.py --rollback      # 回退 BASE_URL（从 state/ 备份恢复）
 ```
 
 **`install.py` 幂等**：重复运行安全，已配置项自动跳过，不覆盖你现有的 `config.json`。它把下面 1-9 步压缩成一次运行——检测 Python/Node/Ollama/模型 → 部署代码 → 注册 MCP → 写 SessionStart hook → 追加 CLAUDE.md 引导 → 建 `/vision` 命令 → 启动代理并验活。
+
+> **提示词 v2 迁移（`prompts_version`）**：v2 把场景从 5 大类扩到 16 大类，新增 `modes` 动态温度表。升级代码后，旧 `config.json`（缺 `prompts_version`）会被 `config_loader` 判定为 v1——旧 5 类提示词**不再叠加**，直接用 v2 内置基线。`install.py` 检测到旧 config 会先备份 `config.json.v1.bak` 再写 `prompts_version: 2`。如需自定义 v2 提示词，在 `config.json` 的 `prompts` / `scenes` / `modes` 下重写（需 `prompts_version: 2` 才生效）。
 
 **排错**：`vision doctor`（或 `install.py --check`）逐项体检四处配置，每项 ✗ 都附带修复命令。
 
@@ -493,6 +520,7 @@ python identify.py <路径> --precision fast|standard|deep  # 指定精度（默
 python identify.py <路径> --type person.anime  # 手动指定大类.小类
 python identify.py <路径> --scan|--zoom|--guess
 python identify.py <路径> --ask "自定义问题"
+python identify.py <路径> --mode identity       # 动态温度：rigorous|identity|military|anime|open（覆盖 guess 温度）
 
 python batch_identify.py <目录> [输出]    # 批量识别目录
 python scan_one.py <图片路径>             # JSON 输出（供脚本/代理用）

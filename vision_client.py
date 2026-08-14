@@ -44,8 +44,15 @@ def _cache_on() -> bool:
         return False
 
 
-# 大类 -> 允许的小类（从 config 读，这里仅为默认兜底）
-MAIN_SCENES = ("person", "animal", "document", "chart", "generic")
+# 大类 -> 允许的小类（从 config 读，这里仅为默认兜底；v2 扩到 16 类 + generic 纯兜底）
+MAIN_SCENES = ("person", "animal", "plant", "food", "vehicle", "machine",
+               "architecture", "document", "chart", "diagram", "map",
+               "screenshot", "object", "meme", "scene", "unknown", "generic")
+
+
+def _valid_mains() -> tuple:
+    """有效大类单一事实源 = config scenes 的键（让 config 新增的类也能被分类）。"""
+    return tuple(config_loader.get().get("scenes", {}).keys())
 
 
 def _scenes() -> dict:
@@ -58,6 +65,16 @@ def _entry(prompt_key: str) -> dict:
     entry = cfg["prompts"].get(prompt_key, {"text": "", "temperature": None})
     temp = entry["temperature"] if entry.get("temperature") is not None else cfg["ollama"]["temperature"]
     return {"text": entry.get("text", ""), "temperature": temp}
+
+
+def _mode_temperature(mode: str) -> float | None:
+    """--mode 动态温度：查 config modes 表；未知/未配置返回 None（调用方回退提示词温度）。"""
+    if not mode:
+        return None
+    try:
+        return float(config_loader.get().get("modes", {}).get(mode))
+    except (TypeError, ValueError):
+        return None
 
 
 def _active_cloud() -> dict | None:
@@ -231,12 +248,12 @@ def _parse_scene(text: str) -> tuple[str, str]:
     m = re.search(r"大类\s*[=:：]\s*(\w+)", text)
     if m:
         cand = m.group(1).lower()
-        if cand in MAIN_SCENES:
+        if cand in _valid_mains():
             main = cand
-    # 无标签时：从文本里挑第一个出现在 MAIN_SCENES 里的词
+    # 无标签时：从文本里挑第一个出现在有效大类里的词
     if main == "generic" and "generic" not in text:
         for tok in re.findall(r"[A-Za-z]+", text):
-            if tok.lower() in MAIN_SCENES:
+            if tok.lower() in _valid_mains():
                 main = tok.lower()
                 break
 
@@ -244,7 +261,7 @@ def _parse_scene(text: str) -> tuple[str, str]:
     ms = re.search(r"小类\s*[=:：]\s*(\w+)", text)
     if ms and ms.group(1) != "无":
         cand = ms.group(1).lower()
-        if cand in all_subs or cand in MAIN_SCENES:
+        if cand in all_subs or cand in _valid_mains():
             sub = cand
     if not sub:
         # 无标签：在 main 允许的小类里挑第一个出现的
@@ -329,12 +346,13 @@ def spatial(path_or_b64: str) -> str:
     return _grounding(path_or_b64, e["text"], e["temperature"])
 
 
-def analyze(path_or_b64: str, precision: str = "") -> str:
+def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
     """按精度档位识别。统一入口，供 proxy / MCP 使用。
     - fast:     1 次 describe（单句描述）——快
     - standard: 2 次 scan + zoom（描述 + 按场景提取事实）
     - deep:     3 次 scan + zoom + guess（完整三次判定，含推测）
     precision 缺省时读 config.prompts.default（或 config ollama.precision）。
+    mode 走 config modes 表动态覆盖 guess 温度（v2 --mode）。
     """
     cfg = config_loader.get()
     if not precision:
@@ -361,7 +379,7 @@ def analyze(path_or_b64: str, precision: str = "") -> str:
         tag = "[OCR]" if ocr_used else "[视觉]"
         return f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}"
     # deep：再加 guess + 空间结构（grounding bbox）
-    guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc)
+    guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc, mode=mode)
     # 模型无关：config ollama.grounding 控制是否启用 grounding（换不支持 bbox 的模型时设 false 跳过）
     spatial_out = ""
     if config_loader.get().get("ollama", {}).get("grounding", True):
@@ -371,6 +389,8 @@ def analyze(path_or_b64: str, precision: str = "") -> str:
             spatial_out = ""  # grounding 失败不影响主体
     tag = "[OCR]" if ocr_used else "[视觉]"
     base = f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}\n\n【推测】\n{guess_out}"
+    if scene == "unknown":
+        base += "\n【结论】模型判定无法归类，以下信息可能不完整，引用时请降级置信度。"
     if spatial_out:
         base += f"\n\n【空间结构】\n{spatial_out}"
     return base
@@ -381,12 +401,18 @@ def scan(path_or_b64: str) -> tuple[str, str, str]:
     e = _entry("scan")
     text = _post_b64(_to_b64(path_or_b64), e["text"], e["temperature"])
     main, sub = _parse_scene(text)
+    if not sub:
+        # 接线 default_sub：scan 未给出小类时用该大类的默认小类（document 默认 report 不触发 OCR 路由）
+        sub = _scenes().get(main, {}).get("default_sub", "") or ""
     return text, main, sub
 
 
 def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str = "") -> str:
-    """第2次：按大类选 zoom 清单，小类作为上下文注入。"""
-    if scene not in MAIN_SCENES:
+    """第2次：按大类选 zoom 清单，小类作为上下文注入。
+
+    scene 能否 zoom 取决于有没有 zoom_<scene> 提示词；缺失（如 config 新增类漏配）回退 generic，
+    避免发「只有 header、正文空」的请求。"""
+    if f"zoom_{scene}" not in config_loader.get()["prompts"]:
         scene = "generic"
     e = _entry(f"zoom_{scene}")
     prompt = e["text"]
@@ -399,9 +425,15 @@ def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str
     return _post_b64(_to_b64(path_or_b64), prompt, e["temperature"])
 
 
-def guess(path_or_b64: str, context: str = "", scene: str = "", sub: str = "", scan_desc: str = "") -> str:
-    """第3次：基于 scan 描述 + zoom 事实 + 场景，大胆推测。"""
+def guess(path_or_b64: str, context: str = "", scene: str = "", sub: str = "",
+          scan_desc: str = "", mode: str = "") -> str:
+    """第3次：基于 scan 描述 + zoom 事实 + 场景，大胆推测。
+
+    mode 走 config modes 表动态覆盖 guess 温度（--mode / describe_image mode）；缺省用提示词温度。"""
     e = _entry("guess")
+    temp = _mode_temperature(mode)
+    if temp is None:
+        temp = e["temperature"]
     prompt = e["text"]
     if scene:
         prompt += f"\n场景大类：{scene}"
@@ -411,4 +443,4 @@ def guess(path_or_b64: str, context: str = "", scene: str = "", sub: str = "", s
         prompt += f"\n\n第1次扫描的初步判断：\n{scan_desc.strip()}"
     if context.strip():
         prompt += f"\n\n已提取的事实特征：\n{context.strip()}"
-    return _post_b64(_to_b64(path_or_b64), prompt, e["temperature"])
+    return _post_b64(_to_b64(path_or_b64), prompt, temp)

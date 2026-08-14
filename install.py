@@ -203,10 +203,33 @@ def deploy_code(check_only=False) -> bool:
     return True
 
 
+def migrate_prompts_version(dst):
+    """v2 迁移：config.json 缺 prompts_version（v1 或其它）时，备份后写入 2。
+
+    旧 v1 的 scenes/prompts 是 5 类，会压住 v2 基线（config_loader 的 prompts_version 门
+    会让旧 config 直接跳过高版本结构）。备份 config.json.v1.bak，只写一个键，不触碰其它用户配置。"""
+    try:
+        with open(dst, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or data.get("prompts_version") == 2:
+            return
+        bak = dst + ".v1.bak"
+        if not os.path.exists(bak):
+            shutil.copy2(dst, bak)
+        data["prompts_version"] = 2
+        with open(dst, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        mark(True, f"config.json 已迁移到 prompts_version=2（旧提示词自定义回退 v2 基线，"
+                   f"v1 备份 → {os.path.basename(bak)}；如需保留请在 prompts_version 下重写）")
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass  # 读不了就跳过（config_loader 有同款兜底）
+
+
 def ensure_config() -> bool:
     dst = os.path.join(TARGET, "config.json")
     if os.path.exists(dst):
         mark(True, f"config.json 存在（保留现有配置）")
+        migrate_prompts_version(dst)
         return True
     src = os.path.join(SRC, "config.json")
     if os.path.exists(src):

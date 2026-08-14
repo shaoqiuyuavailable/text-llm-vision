@@ -16,7 +16,7 @@ import sys
 import vision_client
 import config_loader
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 # 触发规则文本（vision_rules 工具返回；与 mcp_hosts 写入各宿主的规则同源）
 RULES_TEXT = """你的模型没有视觉能力。出现以下情况必须调用相应工具：
@@ -45,10 +45,14 @@ def tool_describe(args):
     if not os.path.isfile(path):
         return _err(f"图片不存在: {path}")
     prompt = (args.get("prompt") or "").strip()
+    mode = (args.get("mode") or "").strip()
     if prompt:
         text = vision_client.describe(path, prompt=prompt)
+    elif mode:
+        # --mode 动态温度（v2）：rigorous/identity/military/anime/open
+        text = vision_client.analyze(path, mode=mode)
     else:
-        text = vision_client.analyze(path)
+        text = vision_client.analyze(path)  # 无 mode 保持原调用（兼容）
     return {"content": [{"type": "text", "text": text}], "isError": False}
 
 
@@ -100,7 +104,8 @@ TOOLS = [
      "description": "识别本地图片，用本地/云端视觉模型返回图片内容的文字描述（Scan→Zoom→Guess 三阶段）。当需要查看图片内容、分析截图、识别图片中的文字/物体/场景时使用。传入图片文件的本地绝对路径。",
      "inputSchema": {"type": "object", "properties": {
          "image": {"type": "string", "description": "图片文件本地绝对路径（如 D:/xxx/photo.jpg）"},
-         "prompt": {"type": "string", "description": "可选的识图指令，指定要关注的内容"}},
+         "prompt": {"type": "string", "description": "可选的识图指令，指定要关注的内容"},
+         "mode": {"type": "string", "description": "可选的识别模式，覆盖推测温度：rigorous(严谨)/identity(人物身份)/military(军事装备)/anime(二次元)/open(开放式理解)"}},
          "required": ["image"]}},
     {"name": "extract_text",
      "description": "提取图片中的全部文字（OCR 优先，回退视觉模型）。用于截图报错、终端红字、文档扫描等纯文字场景。",

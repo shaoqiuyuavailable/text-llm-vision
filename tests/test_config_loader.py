@@ -118,3 +118,52 @@ def test_resolve_backend_model_cloud(monkeypatch, tmp_path):
     b2 = config_loader.resolve_backend()
     assert b2["provider"] == "local"
     assert b2["model"] == "qwen2.5vl"
+
+
+# ---- v2：prompts_version 门 + modes ----
+
+def _write_config(monkeypatch, tmp_path, data):
+    import json
+    conf = tmp_path / "config.json"
+    conf.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(config_loader, "CONFIG_PATH", str(conf))
+    for k in ("OLLAMA_URL", "OLLAMA_BASE_URL", "VISION_MODEL", "VISION_API_KEY", "VISION_API_BASE_URL"):
+        monkeypatch.delenv(k, raising=False)
+
+
+def test_modes_default_from_baseline(monkeypatch, tmp_path):
+    _write_config(monkeypatch, tmp_path, {})
+    cfg = config_loader.get()
+    assert cfg["modes"]["rigorous"] == 0.3
+    assert cfg["modes"]["identity"] == 0.5
+    assert cfg["modes"]["open"] == 0.8
+
+
+def test_prompts_version_gate_skips_old_structure(monkeypatch, tmp_path):
+    # v1 config：scenes/prompts/modes 是旧 5 类，门应跳过它们，用 v2 基线
+    _write_config(monkeypatch, tmp_path, {
+        "prompts_version": 1,
+        "scenes": {"oldscene": {"sub": ["a"], "default_sub": "a"}},
+        "prompts": {"scan": {"text": "旧提示词", "temperature": 0.9}},
+        "modes": {"custom": 0.1},
+    })
+    cfg = config_loader.get()
+    assert "oldscene" not in cfg["scenes"]
+    assert "vehicle" in cfg["scenes"]          # v2 基线 16 类在
+    assert "zoom_vehicle" in cfg["prompts"]     # v2 基线 17 zoom 在
+    assert cfg["prompts"]["scan"]["text"] != "旧提示词"
+    assert "custom" not in cfg["modes"]
+
+
+def test_prompts_version_2_overlays(monkeypatch, tmp_path):
+    _write_config(monkeypatch, tmp_path, {
+        "prompts_version": 2,
+        "modes": {"identity": 0.55},
+        "scenes": {"extra": {"sub": ["x"], "default_sub": "x"}},
+        "prompts": {"scan": {"text": "新提示词", "temperature": 0.2}},
+    })
+    cfg = config_loader.get()
+    assert cfg["prompts"]["scan"]["text"] == "新提示词"
+    assert cfg["modes"]["identity"] == 0.55
+    assert "extra" in cfg["scenes"]
+    assert "vehicle" in cfg["scenes"]  # 基线 + 覆盖并存

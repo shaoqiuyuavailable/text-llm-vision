@@ -44,6 +44,22 @@ def test_describe_image_calls_analyze(monkeypatch, tmp_path):
     assert r["result"]["isError"] is False
 
 
+def test_describe_image_mode_routes_to_analyze(monkeypatch, tmp_path):
+    img = tmp_path / "x.png"
+    img.write_bytes(b"x")
+    calls = {}
+
+    def fake_analyze(p, precision="", mode=""):
+        calls["mode"] = mode
+        return f"MODE:{mode}"
+
+    monkeypatch.setattr(mcp_server.vision_client, "analyze", fake_analyze)
+    r = _call({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+               "params": {"name": "describe_image", "arguments": {"image": str(img), "mode": "anime"}}})
+    assert calls["mode"] == "anime"
+    assert r["result"]["content"][0]["text"] == "MODE:anime"
+
+
 def test_describe_image_prompt_routes_to_describe(monkeypatch, tmp_path):
     img = tmp_path / "x.png"
     img.write_bytes(b"x")
