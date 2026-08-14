@@ -106,8 +106,50 @@ def get() -> dict:
         log.debug("config.json missing, using built-in defaults")  # 首次部署常见，debug 即可
     except (OSError, ValueError, json.JSONDecodeError):
         log.warning("config.json corrupt/unreadable, using built-in defaults")  # 损坏 → warning（#15）
-    # OLLAMA_URL 环境变量覆盖 ollama.url（Docker 连宿主机：host.docker.internal）
-    env_url = os.environ.get("OLLAMA_URL", "").strip()
+    # ---- env 覆盖（MCP server / Docker 直连）：env > config > 默认 ----
+    env_url = os.environ.get("OLLAMA_URL", "").strip() or os.environ.get("OLLAMA_BASE_URL", "").strip()
     if env_url:
         cfg["ollama"]["url"] = env_url
+    env_model = os.environ.get("VISION_MODEL", "").strip()
+    if env_model:
+        cfg["ollama"]["model"] = env_model
+    env_key = os.environ.get("VISION_API_KEY", "").strip()
+    if env_key:
+        # 注入合成云平台（env 驱动），vision_client 经 cloud 通道走云端
+        cfg["cloud"]["clouds"] = [{
+            "name": "env",
+            "base_url": os.environ.get("VISION_API_BASE_URL", "").strip() or "https://api.example.com/v1",
+            "model": env_model or "qwen-vl-plus",
+            "api_key": env_key,
+        }]
+        cfg["cloud"]["active"] = "env"
     return cfg
+
+
+def resolve_backend() -> dict:
+    """归一化后端信息（env > config > 默认），供 MCP server 调试/选后端。
+
+    返回 {provider, active, model, url, api_key, base_url, precision}；
+    provider: "local"(Ollama) 或 "cloud"（有云 key 时）。
+    """
+    cfg = get()
+    o = cfg.get("ollama", {})
+    cloud = cfg.get("cloud", {}) or {}
+    active = cloud.get("active", "")
+    api_key = os.environ.get("VISION_API_KEY", "").strip()
+    base_url = os.environ.get("VISION_API_BASE_URL", "").strip()
+    if not api_key:
+        for c in cloud.get("clouds", []) or []:
+            if c.get("name") == active:
+                api_key = c.get("api_key", "") or ""
+                base_url = c.get("base_url", "") or ""
+    provider = os.environ.get("VISION_PROVIDER", "").strip() or ("cloud" if api_key else "local")
+    return {
+        "provider": provider,
+        "active": active,
+        "model": o.get("model", ""),
+        "url": o.get("url", ""),
+        "api_key": api_key,
+        "base_url": base_url,
+        "precision": o.get("precision", "fast"),
+    }
