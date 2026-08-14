@@ -6,7 +6,7 @@
 
 参考了 [glm-vision](https://github.com/shiss3/glm-vision) 的「MCP + 代理 + 软规则」三层互补架构，视觉后端落在**本地视觉模型**（默认 Qwen2.5-VL，可换任意 Ollama 视觉模型）。
 
-> **English / Keywords**: A **local vision proxy** for text-only LLMs (DeepSeek, Qwen, Kimi, GLM) used by **any AI coding agent** (Claude Code / Cline / OpenCode / Codex). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), **CLAUDE.md soft rules**. **Triple protocol**: Anthropic Messages, OpenAI Chat Completions, OpenAI Responses — decoupled from any vendor. Vision backend: **local vision model** (default Qwen2.5-VL, swappable via config) with **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, **Docker** deployable, **VS Code** control panel. Upstream decoupled: CC Switch auto-follow (Anthropic) + config `upstream_openai` (OpenAI). Similar projects: glm-vision, ds-vision-skill-plus.
+> **English / Keywords**: **MCP vision tools (primary path)** + a paste-image **reverse-proxy fallback** for text-only LLMs (DeepSeek, Qwen, Kimi, GLM) used by **any AI coding agent** (Claude Code / Cline / OpenCode / Codex / Continue / Copilot / Cursor). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), **CLAUDE.md soft rules**. **Triple protocol**: Anthropic Messages, OpenAI Chat Completions, OpenAI Responses — decoupled from any vendor. Vision backend: **local vision model** (default Qwen2.5-VL, swappable via config) with **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, **Docker** deployable, **VS Code** control panel. Upstream decoupled: CC Switch auto-follow (Anthropic) + config `upstream_openai` (OpenAI). Similar projects: glm-vision, ds-vision-skill-plus.
 
 ## 四大差异化卖点
 
@@ -369,7 +369,7 @@ mkdir -p ~/.claude/vision-eyes
 
 ### 4. 启动代理
 
-代理端口由 `config.json` 的 `port` 字段决定（默认 `8787`）。切换端口：`vision local <N>`（端口唯一入口，`vision port` 子命令已并入 `local`），会写 config.json 并提示同步 CC Switch / MCP / settings 三处（见「已知限制」第 14 条）。
+代理端口由 `config.json` 的 `port` 字段决定（默认 `8787`）。切换端口：`vision local <N>`（端口唯一入口，`vision port` 子命令已并入 `local`），会写 config.json 并提示同步**两处**——CC Switch 里纯文本模型 provider 的 Base URL、settings.json 的 `ANTHROPIC_BASE_URL`（MCP server 直连 `vision_client` 不依赖代理端口，无需同步；见「已知限制」第 14 条）。
 
 **手动启动**：
 ```bash
@@ -570,7 +570,7 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `proxy.py` | 反向代理：image→text 转换 + 透传 + 整体日志 + /health 验活 + /api/* 控制端点 |
 | `control_api.py` | 控制 API 纯逻辑：get_status/set_level/set_backend/set_config（复用 toggle+config_loader） |
 | `vision_client.py` | 视觉识别客户端：scan/zoom/guess 三次判定 + 云端通道 + OCR 自动路由 |
-| `config_loader.py` | 读 config.json，缺失回退 prompts.py |
+| `config_loader.py` | 配置读取（env > config.json > 内置默认）；本地/云端后端决策的单一事实来源 |
 | `config.json` | 场景/提示词/温度配置（唯一来源） |
 | `prompts.py` | 内置默认提示词（回退） |
 | `identify.py` | 单图三次判定 CLI |
@@ -579,12 +579,16 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `collect_images.py` | Wikimedia 类别语料采集 |
 | `mcp_server.py` | MCP server（Python，主路径）：5 工具（describe_image/extract_text/locate_object/compare_images/vision_rules），import vision_client 独立存活 |
 | `mcp_hosts.py` | 多宿主 MCP 注册 + 触发规则（install.py --mcp 与 toggle.py doctor 共用） |
+| `QUICKSTART.md` | 干净机器从零上手（迁移/运行/诊断/常见问题）|
 | `mcp-vision.js` | 旧形态 MCP server（Node，仅 describe_image），向后兼容保留；新部署用 mcp_server.py |
 | `toggle.py` | 视觉控制：档位 0/1/2/3 + 后端 local[端口]/cloud[厂商]/list/doctor |
 | `install.py` | 一键部署：环境检测 + 自动配置（MCP/hook/CLAUDE.md/权限）+ 启动代理 + BASE_URL 备份回退 |
+| `_proc.py` | 子进程执行归口（CREATE_NO_WINDOW + `cmd /c` 回退），install/toggle/mcp_hosts 共用 |
 | `vscode-ext/` | VS Code 可视化插件：侧边栏展示/修改配置（TreeView + extension.js + 打包脚本） |
 | `Dockerfile` / `docker-compose.yml` / `.dockerignore` | Docker 独立镜像：暴露 8787，连宿主机 Ollama，挂载 CC Switch/config |
 | `start-proxy.bat` / `start_proxy.py` | 启动代理（bat 薄壳，逻辑全在 Python：读端口/验活/拉起）|
+| `restart_proxy.py` | 重启代理：自杀旧进程 → 重启 → /health 验证 → 确保 BASE_URL |
+| `restart_claude.bat` | 重启 Claude Code + 挂 MCP（外部终端运行，会杀掉当前会话）|
 | `read_port.py` | 输出配置端口（供 bat/脚本用） |
 | `status.bat` | 状态栏（显示档位）|
 | `test_proxy.py` | 代理端到端测试（读配置端口） |
