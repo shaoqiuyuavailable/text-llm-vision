@@ -15,13 +15,21 @@
 
 > 云端可选手动开（DashScope/硅基流动等，配 `cloud.clouds` + key）；默认纯本地零费用。
 
+> **📌 本地模型怎么选（重要）**：文档里默认 `qwen2.5vl`（8.3B / 约 6GB）**只是开箱即用的起点，不代表唯一选择**。请**根据自身需求与设备配置**挑：
+>
+> - **显存小 / 跑不动**（4-8GB）：换轻量模型，如 `qwen2.5vl:3b`、`llava:7b`、`minicpm-v`
+> - **要精度 / 显存充足**（16GB+）：换 `qwen2.5vl:13b`、`qwen2.5vl:32b`、`qwen3-vl` 等
+> - **换法**：`ollama pull <模型名>` 拉取 → 设 `VISION_MODEL=<模型名>`（env，临时）或改 `config.json` 的 `ollama.model`（持久）
+>
+> 模型名全部走配置读取，**不硬编码**——`install.py` / `/vision` / `doctor` 都会按你选中的模型工作（FAQ 见「换模型」）。
+
 ## 二、一分钟跑起来
 
 ```bash
 # 1. 完整依赖（含 OCR：fastapi/uvicorn/httpx/Pillow/rapidocr_onnxruntime）
 pip install -r requirements.txt
 
-# 2. 拉视觉模型（约 6GB）
+# 2. 拉本地视觉模型（默认 qwen2.5vl；可按上方「本地模型怎么选」换更适合你设备/需求的模型）
 ollama pull qwen2.5vl
 
 # 3. 一键部署：检测 → 拷贝到 ~/.claude/vision-eyes → 注册 MCP → hook → CLAUDE.md 规范 → /vision 命令 → 起代理

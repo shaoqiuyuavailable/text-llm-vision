@@ -290,7 +290,7 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 | 依赖 | 版本 | 用途 |
 |------|------|------|
 | [Ollama](https://ollama.com) | ≥ 0.7（含 CUDA）| 本地视觉模型运行时 |
-| `qwen2.5vl` 模型 | 8.3B / Q4_K_M（约 6GB）| 视觉识别模型（Ollama 拉取）|
+| `qwen2.5vl` 模型（默认）| 8.3B / Q4_K_M（约 6GB）| 视觉识别模型（Ollama 拉取）— **可按需更换，见下方「拉取视觉模型」说明** |
 | Python | ≥ 3.10 | 代理 + 识别脚本 |
 | Node.js | ≥ 18 | 旧 mcp-vision.js（可选） |
 | Claude Code | 最新 | 主运行环境 |
@@ -332,6 +332,8 @@ OLLAMA_MODELS = F:\ollama\models
 ollama pull qwen2.5vl
 ollama list        # 确认就位
 ```
+
+> **📌 本地模型怎么选**：`qwen2.5vl` 只是默认起步，**请按自身需求与设备配置挑**——显存小（4-8GB）换 `qwen2.5vl:3b` / `llava:7b` / `minicpm-v`；显存足（16GB+）要精度换 `qwen2.5vl:13b` / `qwen2.5vl:32b` / `qwen3-vl`。换法：`ollama pull <模型名>` 拉取 → 设 `VISION_MODEL=<模型名>`（env，临时）或改 `config.json` 的 `ollama.model`（持久）。模型名全走配置读取、不硬编码，`install.py` / `/vision` / `doctor` 均按所选模型工作。
 
 > 网络受限时：Ollama 模型走 `registry.ollama.ai`，一般直连可用；若失败，配好系统代理后重启 Ollama 重试。
 
