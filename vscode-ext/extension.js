@@ -172,7 +172,7 @@ class VisionTreeProvider {
       items.push(new VisionTreeItem(`模型: ${name} (${m.type}${m.provider ? '/' + m.provider : ''})`,
         'model', m.purpose || '点击操作', { kind: 'modelManage', model: name }));
     }
-    items.push(new VisionTreeItem('场景映射（router）· 点击改绑', 'header', ''));
+    items.push(new VisionTreeItem('场景映射（router）', 'header', ''));
     // 每场景显示生效执行实体（来自 /api/status scene_exec）：ocr → RapidOCR(内置)；vlm → 实际模型
     const execMap = d.scene_exec || {};
     for (const [scene, val] of Object.entries(router)) {
