@@ -44,7 +44,7 @@ const ENGINE_LABELS = {
 };
 
 function sceneLabel(key) {
-  if (key === '_default') return '其他未列出的场景';
+  if (key === '_default') return '其他';
   const [main, sub] = String(key).split('.');
   const ml = SCENE_MAIN_LABELS[main] || main;
   return sub ? `${ml}·${SCENE_SUB_LABELS[sub] || sub}` : ml;
