@@ -103,6 +103,8 @@ def get_status(proxy_info=None) -> dict:
             "grounding": ollama.get("grounding", True),
         },
         "cloud": _cloud_list(cfg),
+        "router": cfg.get("router", {}),   # 生效路由表（基线 + config 覆盖），供面板交互
+        "models": cfg.get("models", {}),   # 生效模型注册表
         "proxy": proxy_info,
         "ollama_service": _ollama_service(),
     }

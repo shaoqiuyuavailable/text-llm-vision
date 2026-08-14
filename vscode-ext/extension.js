@@ -42,16 +42,6 @@ function readMcpStatus() {
   }
 }
 
-// 读模型注册表 + 路由表（v1.5 多路由模型）：config.json 的 models / router
-function readModels() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(path.join(DEPLOY_DIR(), 'config.json'), 'utf8'));
-    return { models: raw.models || {}, router: raw.router || {} };
-  } catch (e) {
-    return { models: {}, router: {} };
-  }
-}
-
 // 改绑场景模型：写 config.json router[scene]（顺带确保 prompts_version=2，让配置在 config_loader 门内生效）
 function setRouterScene(scene, value) {
   const p = path.join(DEPLOY_DIR(), 'config.json');
@@ -168,7 +158,9 @@ class VisionTreeProvider {
         'provider', c.name === d.active_provider ? '当前' : '点击切换', { kind: 'provider', provider: c.name }));
     });
     // ── 模型管理（v1.5 多路由模型：本地 + 云端，按场景配模型，可交互）──
-    const { models, router } = readModels();
+    // 生效视图来自 /api/status（基线 + config 覆盖），config.json 无 router/models 时仍显示基线可交互
+    const models = d.models || {};
+    const router = d.router || {};
     items.push(new VisionTreeItem('── 模型管理 ──', 'header', ''));
     items.push(new VisionTreeItem('＋ 添加模型', 'modelAdd', '点击添加', { kind: 'modelAdd' }));
     const modelNames = Object.keys(models);
