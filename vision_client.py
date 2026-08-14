@@ -442,6 +442,12 @@ _ENGINES = {
     "gui": _engine_gui,      # 界面元素引擎（接 OmniParser 时换函数体）
 }
 
+# guess（第3次推测）只对实体/对象类场景有意义（身份/型号/品牌）。
+# 文本/数据/界面/无法归类类场景的内容已在 OCR/事实里，guess 会基于文字幻觉
+# （把对话框/文档文字当身份证据），跳过——deep 档对这类场景只跑 scan + zoom。
+_GUESS_SCENES = ("person", "animal", "plant", "food", "vehicle", "machine",
+                 "architecture", "object", "meme", "scene")
+
 
 def _run_engine(engine: str, path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
     """调引擎：未注册 / 异常返回空串（调用方回退 vlm，不报错）。回退记 warning 日志（兜底 + 可诊断）。"""
@@ -461,7 +467,7 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
     """按精度档位识别。统一入口，供 proxy / MCP 使用。
     - fast:     1 次 describe（单句描述）——快
     - standard: 2 次 scan + zoom（描述 + 按场景提取事实）
-    - deep:     3 次 scan + zoom + guess（完整三次判定，含推测）
+    - deep:     scan + zoom + guess（实体类场景含身份推测；文本/数据/界面类跳过推测防幻觉）
     precision 缺省时读 config.prompts.default（或 config ollama.precision）。
     mode 走 config modes 表动态覆盖 guess 温度（v2 --mode）。
     """
@@ -486,8 +492,11 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
     if precision == "standard":
         tag = "[OCR]" if ocr_used else "[视觉]"
         return f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}"
-    # deep：再加 guess + 空间结构（grounding bbox），透传场景模型
-    guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc, mode=mode, model=model)
+    # deep：实体类场景再加 guess（身份/型号/品牌推测）；文本/数据/界面类跳过——
+    # 这类场景内容已在 OCR/事实里，guess 会基于文字幻觉（如把对话框文字当身份证据）。
+    guess_out = ""
+    if scene in _GUESS_SCENES:
+        guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc, mode=mode, model=model)
     # 模型无关：config ollama.grounding 控制是否启用 grounding（换不支持 bbox 的模型时设 false 跳过）
     spatial_out = ""
     if config_loader.get().get("ollama", {}).get("grounding", True):
@@ -496,7 +505,9 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
         except Exception:
             spatial_out = ""  # grounding 失败不影响主体
     tag = "[OCR]" if ocr_used else "[视觉]"
-    base = f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}\n\n【推测】\n{guess_out}"
+    base = f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}"
+    if guess_out:
+        base += f"\n\n【推测】\n{guess_out}"
     if scene == "unknown":
         base += "\n【结论】模型判定无法归类，以下信息可能不完整，引用时请降级置信度。"
     if spatial_out:

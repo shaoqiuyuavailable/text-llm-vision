@@ -394,9 +394,11 @@ function activate(context) {
             break;
           }
           case 'routerScene': {
+            const curTxt = action.value ? `${engineLabel(action.value)}（${action.value}）` : '未设置';
             const val = await vscode.window.showInputBox({
               value: action.value || '',
-              prompt: '输入场景路由值（如 vlm:qwen2.5vl / ocr，模型须在 models 注册）',
+              prompt: `改绑「${sceneLabel(action.scene)}」，当前 ${curTxt}。` +
+                      '输入 引擎:模型 或 引擎，如 vlm:qwen2.5vl / ocr（模型须已注册）',
             });
             if (val !== undefined && val.trim()) {
               try {

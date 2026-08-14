@@ -169,7 +169,7 @@ def test_analyze_passes_mode_to_guess(monkeypatch):
         return "推测"
 
     monkeypatch.setattr(vision_client, "guess", fake_guess)
-    monkeypatch.setattr(vision_client, "scan", lambda p: ("描述", "generic", ""))
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("描述", "vehicle", "car"))
     monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: "事实")
     out = vision_client.analyze("/tmp/x.png", "deep", mode="anime")
     assert captured["mode"] == "anime"
@@ -406,6 +406,34 @@ def test_analyze_screenshot_software_ui_uses_gui_prompt(monkeypatch):
     out = vision_client.analyze("/tmp/x.png", "standard")
     assert "登录" in out
     assert "可交互" in captured["prompt"] or "元素" in captured["prompt"]
+
+
+def test_analyze_deep_document_skips_guess(monkeypatch):
+    # 防幻觉：文本/数据类场景（document 等）不跑 guess——内容已在事实里，guess 会基于文字编造身份
+    called = []
+    monkeypatch.setattr(vision_client, "guess", lambda *a, **k: called.append(1) or "不应出现")
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("文档", "document", "report"))
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: "文档事实")
+    import config_loader
+    monkeypatch.setattr(config_loader, "get",
+                        lambda: {"router": {"_default": "vlm"}, "ollama": {"model": "qwen2.5vl", "grounding": False}})
+    out = vision_client.analyze("/tmp/x.png", "deep")
+    assert not called          # guess 未调用
+    assert "文档事实" in out
+    assert "【推测】" not in out
+
+
+def test_analyze_deep_screenshot_skips_guess(monkeypatch):
+    called = []
+    monkeypatch.setattr(vision_client, "guess", lambda *a, **k: called.append(1) or "不应出现")
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("界面", "screenshot", "software_ui"))
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: "界面事实")
+    import config_loader
+    monkeypatch.setattr(config_loader, "get",
+                        lambda: {"router": {"_default": "vlm"}, "ollama": {"model": "qwen2.5vl", "grounding": False}})
+    out = vision_client.analyze("/tmp/x.png", "deep")
+    assert not called
+    assert "【推测】" not in out
 
 
 def test_engine_table_passes_model_override(monkeypatch):
