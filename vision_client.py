@@ -146,8 +146,8 @@ def _post_b64(b64: str, prompt: str, temperature: float, model: str = "") -> str
     # 缓存只在 deep 档(3)启用：fast/standard 收益趋近于零，deep 多次调用才值得。
     use_cache = _cache_on()
     ac = _active_cloud()
-    # 生效模型：显式模型优先；否则云端 active 模型；否则全局 ollama.model
-    eff_model = model or ((ac.get("model") if ac else "") or o["model"])
+    # 生效模型（缓存 key 用）：显式模型优先；云端时用 active 厂商 model；本地用全局 ollama.model
+    eff_model = model or ((ac.get("model") if (ac and use_cloud) else "") or o["model"])
     if use_cache:
         # 缓存 key 含 model + temperature：换模型/改温度后不命中旧缓存（防拿过期结果）
         key = hashlib.sha256((eff_model + "|" + b64 + "|" + prompt + "|" + str(temperature)).encode()).hexdigest()
@@ -158,8 +158,10 @@ def _post_b64(b64: str, prompt: str, temperature: float, model: str = "") -> str
         provider = mdef.get("provider", "") if model else ""
         text = _post_cloud(b64, prompt, temperature, provider=provider)
     else:
+        # 本地路径：显式模型（v1.5 模型级，如 vlm:llava）或全局 ollama.model；绝不混入云端厂商 model（防 404）
+        local_model = model or o["model"]
         with _OLLAMA_SEM:  # 并发上限 2，防本地单卡雪崩
-            r = httpx.post(o["url"], json={"model": eff_model, "prompt": prompt, "images": [b64],
+            r = httpx.post(o["url"], json={"model": local_model, "prompt": prompt, "images": [b64],
                                            "stream": False, "options": {"temperature": temperature,
                                                                         "top_p": o["top_p"]}},
                            timeout=120, trust_env=False)

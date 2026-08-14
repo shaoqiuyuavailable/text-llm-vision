@@ -301,3 +301,35 @@ def test_run_engine_unregistered_logs_warning(monkeypatch, caplog):
         out = vision_client._run_engine("nope", "B64", "table", "", "desc")
     assert out == ""
     assert any("未注册" in r.message for r in caplog.records)
+
+
+def test_post_b64_local_ignores_cloud_model(monkeypatch):
+    # 回归：active 指向云端厂商（无 key → use_cloud False）时，本地请求必须用 ollama.model，
+    # 绝不混入云端厂商 model（曾因此向 Ollama 发 qwen-vl-plus → 404）
+    import threading as _th
+    captured = {}
+
+    class FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": "text"}
+
+    def fake_post(url, json=None, timeout=None, trust_env=None):
+        captured["model"] = json["model"]
+        return FakeResp()
+
+    monkeypatch.setattr(vision_client, "_use_cloud", lambda: False)
+    monkeypatch.setattr(vision_client, "_cache_on", lambda: False)
+    monkeypatch.setattr(vision_client, "_active_cloud",
+                        lambda: {"name": "dashscope", "model": "qwen-vl-plus"})
+    monkeypatch.setattr(vision_client, "_OLLAMA_SEM", _th.BoundedSemaphore(1))
+    monkeypatch.setattr(vision_client, "httpx", type("H", (), {"post": staticmethod(fake_post)})())
+    import config_loader
+    monkeypatch.setattr(config_loader, "get",
+                        lambda: {"ollama": {"url": "http://localhost:11434/api/generate",
+                                            "model": "qwen2.5vl", "top_p": 0.8},
+                                 "models": {"qwen2.5vl": {"type": "ollama"}}})
+    vision_client._post_b64("B64", "prompt", 0.3)
+    assert captured["model"] == "qwen2.5vl"  # 本地请求用 ollama.model，非 qwen-vl-plus
