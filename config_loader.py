@@ -43,6 +43,9 @@ def _defaults() -> dict:
             "model": _prompts.VISION_MODEL,
             "temperature": _prompts.TEMPERATURE,
             "top_p": _prompts.TOP_P,
+            # 空间结构识别（deep 档 grounding bbox）。模型无关：支持 grounding 的模型
+            # 才开（如 Qwen2.5-VL）；换不支持 bbox 定位的模型时设 false 跳过 spatial。
+            "grounding": True,
         },
         # 可选云端通道（多平台轮换）：clouds 数组 + cloud.active 选当前平台。
         # 任一平台配了 key 就走云端（OpenAI 兼容），否则纯本地 Ollama。

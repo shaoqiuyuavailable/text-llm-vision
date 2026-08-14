@@ -113,7 +113,9 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 档位决定调用次数：`1=fast`（仅 scan 的描述部分）、`2=standard`（scan+zoom）、`3=deep`（scan+zoom+guess 完整三次 + **空间结构 grounding**）。
 
-> **空间结构（deep 档专属）**：deep 档额外调用 Qwen2.5-VL 的 grounding 能力，输出**结构化 JSON**（元素名 + 边界框 bbox 坐标）+ 原图尺寸。解决纯文本模型读散文描述时的「空间迷失」——CSS 布局、UI 对齐、图表坐标等场景，主模型基于结构化坐标推理拓扑关系，而非脑补。档位设置见「视觉档位开关」章节。
+> **空间结构（deep 档专属）**：deep 档额外调用 grounding 能力，输出**结构化 JSON**（元素名 + 边界框 bbox 坐标）+ 原图尺寸。解决纯文本模型读散文描述时的「空间迷失」——CSS 布局、UI 对齐、图表坐标等场景，主模型基于结构化坐标推理拓扑关系，而非脑补。档位设置见「视觉档位开关」章节。
+>
+> **模型无关（可更换视觉模型）**：识别模型完全由 `config.json` 的 `ollama.model`（本地）或 `cloud.xxx.model`（云端）决定，换模型改配置即可。`scan/zoom/guess` 提示词通用；**`grounding`（空间结构）通过 `ollama.grounding` 开关控制**（默认 `true`）——换不支持边界框定位的模型时设 `false`，deep 档自动跳过 spatial（提示词已通用化，不再绑定 Qwen 格式）。
 
 **场景分层**（5 大类 × 小类）：
 

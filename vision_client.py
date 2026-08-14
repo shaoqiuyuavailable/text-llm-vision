@@ -348,10 +348,13 @@ def analyze(path_or_b64: str, precision: str = "") -> str:
         return f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}"
     # deep：再加 guess + 空间结构（grounding bbox）
     guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc)
-    try:
-        spatial_out = spatial(path_or_b64)
-    except Exception:
-        spatial_out = ""  # grounding 失败不影响主体
+    # 模型无关：config ollama.grounding 控制是否启用 grounding（换不支持 bbox 的模型时设 false 跳过）
+    spatial_out = ""
+    if config_loader.get().get("ollama", {}).get("grounding", True):
+        try:
+            spatial_out = spatial(path_or_b64)
+        except Exception:
+            spatial_out = ""  # grounding 失败不影响主体
     tag = "[OCR]" if ocr_used else "[视觉]"
     base = f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}\n\n【推测】\n{guess_out}"
     if spatial_out:
