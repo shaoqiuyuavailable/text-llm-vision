@@ -86,10 +86,12 @@ def get_status(proxy_info=None) -> dict:
     """合并状态：档位/后端/端口/上游/ollama 配置/云端厂商/proxy 健康/ollama 服务。"""
     cfg = config_loader.get()
     ollama = cfg.get("ollama", {}) or {}
+    _use_cloud = config_loader.use_cloud()
     return {
         "level": _read_level(),
-        "backend": "cloud" if config_loader.use_cloud() else "local",
-        "active_provider": (config_loader.active_cloud() or {}).get("name", ""),
+        "backend": "cloud" if _use_cloud else "local",
+        # active_provider 只在真走云端时显示：active 指向无 key 厂商时实际走本地，不挂厂商名（防「local(siliconflow)」误导）
+        "active_provider": (config_loader.active_cloud() or {}).get("name", "") if _use_cloud else "",
         "port": cfg.get("port", 8787),
         "upstream": cfg.get("upstream", ""),
         "upstream_openai": cfg.get("upstream_openai", ""),
