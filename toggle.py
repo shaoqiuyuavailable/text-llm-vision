@@ -1,13 +1,12 @@
 import subprocess, sys, os, json
 import _proc
+import config_loader
 
 # 档位定义：0=off 1=fast 2=standard 3=deep
 # on/off 向后兼容：on→1(fast), off→0
 STATE = os.path.expanduser("~/.claude/vision-eyes/state")
 CONFIG = os.path.expanduser("~/.claude/vision-eyes/config.json")
 NAMES = {0: "OFF", 1: "fast", 2: "standard", 3: "deep"}
-# off 时主动卸载的模型（从 config 读或默认 qwen2.5vl）
-VISION_MODEL = "qwen2.5vl"
 
 
 def parse(arg: str) -> int:
@@ -24,13 +23,12 @@ def parse(arg: str) -> int:
 
 
 def _unload_model():
-    """off 时主动卸载视觉模型，立即释放显存（不等 keep_alive 超时）。
-    模型未驻留时 ollama stop 无害；失败不阻塞（容错）。"""
+    """off 时主动卸载视觉模型，立即释放显存（不等 keep_alive 超时）。"""
     try:
-        subprocess.run(["ollama", "stop", VISION_MODEL],
-                       timeout=30, capture_output=True)
+        model = config_loader.get().get("ollama", {}).get("model") or "qwen2.5vl"
+        subprocess.run(["ollama", "stop", model], timeout=30, capture_output=True)
     except Exception:
-        pass  # ollama 未装/未跑/已卸载 → 忽略
+        pass
 
 
 def _read_cfg() -> dict:
@@ -89,10 +87,11 @@ def doctor() -> int:
     print(f"{'✓' if ok else '✗'}  Ollama 服务" + ("" if not ok else f"（{out.strip().splitlines()[1].split()[0] if len(out.splitlines())>1 else '运行中'}）"))
     if not ok:
         print("   → 启动 Ollama（桌面应用或 `ollama serve`）后重试")
-    has_model = VISION_MODEL in out
-    print(f"{'✓' if has_model else '✗'}  视觉模型 {VISION_MODEL}")
+    model = config_loader.get().get("ollama", {}).get("model") or "qwen2.5vl"
+    has_model = model in out
+    print(f"{'✓' if has_model else '✗'}  视觉模型 {model}")
     if not has_model:
-        print(f"   → ollama pull {VISION_MODEL}")
+        print(f"   → ollama pull {model}")
 
     # 2. 代理健康
     try:

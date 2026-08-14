@@ -34,7 +34,6 @@ STATE_DIR = os.path.expanduser("~/.claude/vision-eyes/state")
 BAK = os.path.join(STATE_DIR, "settings.json.bak.vision")  # BASE_URL 改动前备份
 SRC = os.path.dirname(os.path.abspath(__file__))           # 本文件所在目录（项目源）
 PORT = config_loader.get_port()
-VISION_MODEL = "qwen2.5vl"
 PIP_DEPS = ["fastapi", "uvicorn", "httpx"]
 
 # 部署需要的文件清单（拷贝时排除 __pycache__/.git/日志/state/用户 config）
@@ -149,6 +148,7 @@ def check_ollama(auto=False) -> bool:
     if not ok:
         print("   → 安装: winget install Ollama.Ollama，然后重开终端")
         return False
+    model = config_loader.get().get("ollama", {}).get("model") or "qwen2.5vl"
     # 运行中？ollama list 能连上服务才算
     code, out = run(["ollama", "list"])
     ok_run = code == 0
@@ -157,15 +157,15 @@ def check_ollama(auto=False) -> bool:
         print("   → 启动 Ollama（桌面应用或 `ollama serve`），再重跑")
         return False
     # 模型
-    has_model = VISION_MODEL in out
-    mark(has_model, f"视觉模型 {VISION_MODEL}（ollama list）")
+    has_model = model in out
+    mark(has_model, f"视觉模型 {model}（ollama list）")
     if not has_model:
         if auto:
             print(f"   → 拉取中（约 6GB，耗时看网速）…")
-            code, o = run(["ollama", "pull", VISION_MODEL], timeout=600)
-            mark(code == 0, f"ollama pull {VISION_MODEL}")
+            code, o = run(["ollama", "pull", model], timeout=600)
+            mark(code == 0, f"ollama pull {model}")
             return code == 0
-        print(f"   → 修复: ollama pull {VISION_MODEL}（或 install.py --auto）")
+        print(f"   → 修复: ollama pull {model}（或 install.py --auto）")
         return False
     return True
 

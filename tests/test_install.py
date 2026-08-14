@@ -38,3 +38,23 @@ def test_register_all_dispatch(monkeypatch):
     monkeypatch.setattr(mcp_hosts, "register_host", lambda h: fake.__setitem__(h, True) or [h])
     install.register_mcp("all")
     assert all(fake[h] for h in mcp_hosts.HOSTS)
+
+
+def test_check_ollama_uses_config_model(monkeypatch):
+    import config_loader
+    calls = []
+
+    def fake_run(cmd, timeout=600):
+        calls.append(cmd)
+        if cmd[0] == "ollama" and cmd[1] == "list":
+            return 0, "NAME\nllava:latest\n"  # 驻留 llava，非 qwen2.5vl
+        if cmd[0] == "ollama" and cmd[1] == "--version":
+            return 0, "ollama version 0.1.0\n"
+        return 0, ""
+
+    monkeypatch.setattr(install, "run", fake_run)
+    monkeypatch.setattr(config_loader, "get", lambda: {"ollama": {"model": "llava"}})
+    ok = install.check_ollama(auto=False)
+    assert ok is True  # llava 已驻留 → ✓，不触发 pull
+    assert not any("pull" in c for c in calls)
+    assert getattr(install, "VISION_MODEL", None) is None  # 模块级硬编码已删
