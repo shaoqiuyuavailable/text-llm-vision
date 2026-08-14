@@ -80,3 +80,46 @@ def test_host_status_shape(monkeypatch):
     assert len(rows) >= 7
     assert all(len(r) == 3 for r in rows)
     assert rows[0][0] == "claude"
+
+
+def test_claude_mcp_upsert_removes_then_adds(monkeypatch):
+    calls = []
+
+    def fake_cmd(args, timeout=20):
+        calls.append(list(args))
+        if args[:3] == ["claude", "mcp", "list"]:
+            return 0, "vision ... mcp-vision.js"
+        if "remove" in args:
+            return 0, "Removed"
+        if "add" in args:
+            return 0, "Added"
+        return 0, ""
+
+    monkeypatch.setattr(mcp_hosts, "_cmd", fake_cmd)
+    monkeypatch.setattr(mcp_hosts, "_python_cmd", lambda: "python")
+    code, _ = mcp_hosts.claude_mcp_upsert("C:/srv/mcp_server.py")
+    assert code == 0
+    add = [c for c in calls if "add" in c]
+    remove = [c for c in calls if "remove" in c]
+    assert add and remove  # 同名已注册 → 先 remove 再 add
+    assert add[0][-1] == "C:/srv/mcp_server.py"
+    assert calls.index(remove[0]) < calls.index(add[0])
+
+
+def test_claude_mcp_upsert_no_remove_when_absent(monkeypatch):
+    calls = []
+
+    def fake_cmd(args, timeout=20):
+        calls.append(list(args))
+        if args[:3] == ["claude", "mcp", "list"]:
+            return 0, ""  # 未注册
+        if "add" in args:
+            return 0, "Added"
+        return 0, ""
+
+    monkeypatch.setattr(mcp_hosts, "_cmd", fake_cmd)
+    monkeypatch.setattr(mcp_hosts, "_python_cmd", lambda: "python")
+    code, _ = mcp_hosts.claude_mcp_upsert("C:/srv/mcp_server.py")
+    assert code == 0
+    assert not any("remove" in c for c in calls)  # 未注册不 remove
+    assert any("add" in c for c in calls)

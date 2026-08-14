@@ -23,6 +23,7 @@ import sys
 import urllib.request
 
 import config_loader
+import mcp_hosts
 import _proc
 
 TARGET = os.path.expanduser("~/.claude/vision-eyes")   # 部署目标目录
@@ -233,8 +234,7 @@ def ensure_mcp() -> bool:
             mark(True, "MCP server `vision` 已注册（非本脚本 command，保留）")
             return True
     server = os.path.join(TARGET, "mcp_server.py")
-    cmd = ["claude", "mcp", "add", "--scope", "user", "vision", "--", sys.executable, server]
-    code, _ = run(cmd, timeout=30)
+    code, _ = mcp_hosts.claude_mcp_upsert(server)
     ok = code == 0 and "mcp_server.py" in _mcp_list()
     mark(ok, "注册 MCP server `vision`（mcp_server.py）")
     if not ok:

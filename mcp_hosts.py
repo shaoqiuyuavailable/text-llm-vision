@@ -197,12 +197,24 @@ def write_continue_rules(path: str):
 
 # ---- 注册入口 ----
 
+def claude_mcp_upsert(server_path: str) -> tuple:
+    """注册/覆盖 claude 的 vision MCP：同名已注册先 remove 再 add。
+
+    claude mcp add 对同名已注册报 "already exists"（真机验证），覆盖必须 remove→add。
+    返回 (code, out)。
+    """
+    code, out = _cmd(["claude", "mcp", "list"])
+    if code == 0 and "vision" in out:
+        _cmd(["claude", "mcp", "remove", "vision"])
+    return _cmd(["claude", "mcp", "add", "--scope", "user", "vision",
+                 "--", _python_cmd(), server_path])
+
+
 def register_host(host: str) -> list:
     """注册一个宿主：写 MCP 配置 + 写触发规则。返回描述行列表。"""
     msgs = []
     if host == "claude":
-        code, _ = _cmd(["claude", "mcp", "add", "--scope", "user", "vision",
-                        "--", _python_cmd(), _server_args()[0]])
+        code, _ = claude_mcp_upsert(_server_args()[0])
         msgs.append(f"claude: {'✓' if code == 0 else '✗'} claude mcp add")
         _append_if_missing(os.path.join(_home(), "CLAUDE.md"), RULES_TEXT, "describe_image")
     elif host == "codex":

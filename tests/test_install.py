@@ -15,45 +15,54 @@ def test_ensure_mcp_skips_when_python_registered(monkeypatch):
 
 
 def test_ensure_mcp_overwrites_old_node(monkeypatch):
+    import mcp_hosts
     calls = []
-    registered = []
+    removed = []
 
     def fake_list():
-        if registered:
-            return "vision  claude-2  python  C:/x/mcp_server.py"
-        return "vision  claude-2  node  C:/x/mcp-vision.js"
+        # remove 执行后 = 新注册完成（mcp_server.py 出现）
+        return "vision  claude-2  python  C:/x/mcp_server.py" if removed else "vision  claude-2  node  C:/x/mcp-vision.js"
 
-    def fake_run(cmd, timeout=30):
-        calls.append(cmd)
-        if "mcp add" in " ".join(cmd):
-            registered.append(True)
-        return (0, "")
+    def fake_cmd(args, timeout=20):
+        calls.append(list(args))
+        if args[:3] == ["claude", "mcp", "list"]:
+            return 0, "vision ... mcp-vision.js"
+        if "remove" in args:
+            removed.append(True)
+            return 0, "Removed"
+        if "add" in args:
+            return 0, "Added"
+        return 0, ""
 
     monkeypatch.setattr(install, "_mcp_list", fake_list)
-    monkeypatch.setattr(install, "run", fake_run)
+    monkeypatch.setattr(mcp_hosts, "_cmd", fake_cmd)
+    monkeypatch.setattr(mcp_hosts, "_python_cmd", lambda: "python")
     ok = install.ensure_mcp()
     assert ok is True
-    add = [c for c in calls if "mcp add" in " ".join(c)]
-    assert add and any("mcp_server.py" in " ".join(a) for a in add)
+    assert any("remove" in c for c in calls)  # 覆盖 = remove→add
+    assert any("add" in c and any("mcp_server.py" in str(a) for a in c) for c in calls)
 
 
 def test_ensure_mcp_registers_when_absent(monkeypatch):
+    import mcp_hosts
     calls = []
-    registered = []
 
     def fake_list():
-        return "vision  claude-2  python  C:/x/mcp_server.py" if registered else ""
+        return "vision ... mcp_server.py" if any("add" in c for c in calls) else ""
 
-    def fake_run(cmd, timeout=30):
-        calls.append(cmd)
-        if "mcp add" in " ".join(cmd):
-            registered.append(True)
-        return (0, "")
+    def fake_cmd(args, timeout=20):
+        calls.append(list(args))
+        if args[:3] == ["claude", "mcp", "list"]:
+            return 0, ""  # 未注册
+        if "add" in args:
+            return 0, "Added"
+        return 0, ""
 
     monkeypatch.setattr(install, "_mcp_list", fake_list)
-    monkeypatch.setattr(install, "run", fake_run)
+    monkeypatch.setattr(mcp_hosts, "_cmd", fake_cmd)
+    monkeypatch.setattr(mcp_hosts, "_python_cmd", lambda: "python")
     assert install.ensure_mcp() is True
-    assert any("mcp add" in " ".join(c) for c in calls)
+    assert any("add" in c for c in calls)
 
 
 def test_check_node_advisory(monkeypatch):
