@@ -491,6 +491,8 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 
 | 树节点 | 点击操作 | 底层调用 |
 |---|---|---|
+| **MCP: mcp_server.py ✓ / 旧 node** | 旧 node/未注册时点击迁移 | 读 `~/.claude.json` + `install.py --mcp claude` |
+| **工具: describe_image · …** | 只读（5 工具列表） | 读 `~/.claude.json` |
 | 档位: fast (1) | 选 off/fast/standard/deep | `POST /api/level` |
 | 后端: local | 选本地/云端 + 厂商 | `POST /api/backend` |
 | 端口: 8787 | 输入端口（提示需重启） | `POST /api/backend` |
@@ -504,12 +506,9 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 
 > **为何用 TreeView 而非 WebviewView**：本环境（Claude Code for VS Code）下 WebviewView 的 `resolveWebviewView` **不触发**（provider 注册成功、但视图内容不渲染，报「没有可提供视图数据的已注册数据提供程序」）。TreeView 走 `registerTreeDataProvider`，机制完全不同，稳定可靠。
 
-> **适配现状（MCP 主路径改造后）**：本插件定位是**代理配置面板**，聚焦「识别后端 + 代理状态」，**未适配 MCP 主路径**。它仍可用（`/api/status` 字段名未变、取值更准——`backend` 已与 `vision_client` 同源），但存在缺口：
-> - ❌ 不显示 MCP server（`mcp_server.py`）状态——面板没有「5 工具可用性 / MCP 运行态」节点；
-> - ❌ 不感知 `vision` 是否已是 python server（node→python 迁移）；
-> - ⚠️ 设了 `VISION_API_KEY` 环境变量时，面板「后端切换」可能被 env 静默覆盖（env>config 优先级所致，已知限制）。
+> **适配现状（MCP 主路径改造后）**：本插件在代理配置面板基础上，新增了「MCP 主路径」区——显示 `vision` 注册的是 `mcp_server.py`（python，✓ 主路径）还是旧 `mcp-vision.js`（node，点击即迁移，调用 `install.py --mcp claude`），并列出 5 个工具。MCP 状态直接读 `~/.claude.json` 的用户级注册，不依赖代理。
 >
-> 适配 MCP 主路径（加 MCP 状态节点 + 新旧迁移提示）列为后续增强，不在本分支范围。
+> 保留的已知限制：设了 `VISION_API_KEY` 环境变量时，面板「后端切换」可能被 env 静默覆盖（env>config 优先级所致）。
 
 ## 视觉档位
 

@@ -1,6 +1,6 @@
 # text-llm-vision 可视化插件
 
-在 VS Code 侧边栏动态展示并修改 [text-llm-vision](../README.md) 代理的配置——档位、后端、端口、温度/top_p、上游、云端厂商。**复用后端控制 API（`/api/*`），不重写任何识别逻辑。**
+在 VS Code 侧边栏动态展示并修改 [text-llm-vision](../README.md) 的配置——**MCP 主路径状态**、档位、后端、端口、温度/top_p、上游、云端厂商。**复用后端控制 API（`/api/*`），MCP 状态直接读 `~/.claude.json`，不重写任何识别逻辑。**
 
 ## 前置
 
@@ -28,6 +28,8 @@ code --install-extension text-llm-vision-*.vsix
 
 | 树节点 | 点击操作 | 底层调用 |
 |------|------|---------|
+| **MCP: mcp_server.py ✓ / 旧 node** | 旧 node/未注册时点击迁移 | 读 `~/.claude.json` + `python install.py --mcp claude` |
+| **工具: describe_image · …** | 只读（5 工具列表） | 读 `~/.claude.json` |
 | 档位: fast (1) | 选 off/fast/standard/deep（off 自动 `ollama stop`） | `POST /api/level` |
 | 后端: local | 选本地/云端 + 厂商 | `POST /api/backend` |
 | 端口: 8787 | 输入端口（改后提示需重启代理/会话） | `POST /api/backend` |
@@ -49,12 +51,8 @@ code --install-extension text-llm-vision-*.vsix
 
 ```
 TreeView（registerTreeDataProvider）──▶ extension.js（主线程）
-                                            │  fetch
-                                            ▼
-                            代理 /api/*（control_api.py）
-                                            │  import toggle + config_loader
-                                            ▼
-                            config.json / state / ollama
+                                            │  ├─ fetch ──▶ 代理 /api/*（control_api.py → toggle/config_loader → config.json / state / ollama）
+                                            │  └─ 读文件 ─▶ ~/.claude.json（MCP 注册：mcp_server.py vs mcp-vision.js）
 ```
 
 ## 为何用 TreeView 而非 WebviewView
