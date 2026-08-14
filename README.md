@@ -162,6 +162,22 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 > **MCP 主路径 vs 代理兜底**：主路径是模型**主动**调用 `mcp_server.py`（Python MCP server，stdio，零第三方依赖）识图，识别引擎与代理共用 `vision_client`，但**不依赖代理进程、独立存活**，可挂任意支持 MCP 的宿主（Claude Code / Codex / OpenCode / Cline / Continue / Copilot / Cursor）。代理（`proxy.py`）只负责**兜底**：对话内粘贴的图片由它自动拦截转文字（见下方「请求流转（粘贴图片）」）。旧形态 `mcp-vision.js`（Node，仅 `describe_image` 一个工具）保留向后兼容，**新部署统一用 `mcp_server.py`**。
 
+### 组件入口与生命周期（谁消费什么 · 怎么跑起来）
+
+| 组件 | 面向对象 | 入口 | 运行方式 |
+|---|---|---|---|
+| `mcp_server.py`（MCP 主路径） | **任意支持 MCP 的宿主**（Claude Code / Codex / OpenCode / Cline / Continue / Copilot / Cursor） | 宿主按注册 spawn `python mcp_server.py`（stdio） | **按需子进程**：宿主启动时自动拉起，宿主关闭时随 stdin EOF 退出——不是常驻服务 |
+| `proxy.py`（代理兜底） | Claude Code（对话内粘贴图）+ 操作层（`/identify`、VS Code 面板） | `start-proxy.bat` / `start_proxy.py`（uvicorn :8787） | **常驻守护**：SessionStart hook 自动拉起；`restart_proxy.py` 自杀重启 |
+| `vscode-ext/`（配置面板） | VS Code 里的可视化配置 | VS Code 侧边栏 TreeView | 薄 UI，读 `/api/status`、写 `/api/*`，每 5s 刷新 |
+
+**MCP「自启动」的准确含义**：MCP server 不自启动、不是 daemon——它是宿主的按需 stdio 子进程。只要注册指向 `mcp_server.py`（由 `install.py --mcp claude` 完成），宿主**每次启动都会自动 spawn 它**；宿主退出即随之退出。真正「常驻 + 自启」的是 **proxy**（SessionStart hook 拉起 uvicorn）。
+
+**入口命令速查**：
+- 挂 MCP（多宿主）：`python install.py --mcp <claude|codex|opencode|cline|continue|copilot|cursor|all>`——同名已注册先 remove 再 add（`mcp_hosts.claude_mcp_upsert`）
+- 起/验代理：`python start_proxy.py`；重启代理：`python restart_proxy.py`（自杀→重启→验证→确保 BASE_URL）
+- 重启 Claude Code + 挂 MCP：`restart_claude.bat`（外部终端运行，会杀掉当前会话）
+- 操作 CLI：`python toggle.py vision 0-3|local|cloud|doctor`（即 `/vision` 命令）
+
 ### 三协议（Anthropic + OpenAI Chat + OpenAI Responses，解除 Claude 强绑定）
 
 | 入站端点 | 上游 | 适用客户端 |
@@ -487,6 +503,13 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 **安装**：`vscode-ext/` 下 `bash scripts/package.sh` 打包 `.vsix` → `code --install-extension`；或 `code .` + F5 调试开发（详见 `vscode-ext/README.md`）。
 
 > **为何用 TreeView 而非 WebviewView**：本环境（Claude Code for VS Code）下 WebviewView 的 `resolveWebviewView` **不触发**（provider 注册成功、但视图内容不渲染，报「没有可提供视图数据的已注册数据提供程序」）。TreeView 走 `registerTreeDataProvider`，机制完全不同，稳定可靠。
+
+> **适配现状（MCP 主路径改造后）**：本插件定位是**代理配置面板**，聚焦「识别后端 + 代理状态」，**未适配 MCP 主路径**。它仍可用（`/api/status` 字段名未变、取值更准——`backend` 已与 `vision_client` 同源），但存在缺口：
+> - ❌ 不显示 MCP server（`mcp_server.py`）状态——面板没有「5 工具可用性 / MCP 运行态」节点；
+> - ❌ 不感知 `vision` 是否已是 python server（node→python 迁移）；
+> - ⚠️ 设了 `VISION_API_KEY` 环境变量时，面板「后端切换」可能被 env 静默覆盖（env>config 优先级所致，已知限制）。
+>
+> 适配 MCP 主路径（加 MCP 状态节点 + 新旧迁移提示）列为后续增强，不在本分支范围。
 
 ## 视觉档位
 
