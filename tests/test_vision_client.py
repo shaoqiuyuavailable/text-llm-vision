@@ -1,0 +1,37 @@
+import vision_client
+
+
+def test_locate_injects_query(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature):
+        captured["prompt"] = prompt
+        return '[{"name":"提交按钮","bbox":[100,200,300,400]}]'
+
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "BASE64")
+    out = vision_client.locate("/tmp/x.png", "提交按钮")
+    assert "提交按钮" in captured["prompt"]
+    assert "bbox" in out
+
+
+def test_compare_three_calls(monkeypatch):
+    calls = []
+
+    def fake_analyze(path, precision=""):
+        calls.append(("analyze", path))
+        return f"desc:{path}"
+
+    def fake_post(b64, prompt, temperature):
+        calls.append(("post", prompt))
+        return "差异要点"
+
+    monkeypatch.setattr(vision_client, "analyze", fake_analyze)
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: p)
+    out = vision_client.compare("a.png", "b.png", "fast")
+    assert calls[0] == ("analyze", "a.png")
+    assert calls[1] == ("analyze", "b.png")
+    assert calls[2][0] == "post"
+    assert "【图A】" in out and "【图B】" in out and "【对比】" in out
+    assert "desc:b.png" in calls[2][1]  # 图B描述注入对比 prompt
