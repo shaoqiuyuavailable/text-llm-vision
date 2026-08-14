@@ -16,8 +16,21 @@ def test_ensure_mcp_skips_when_python_registered(monkeypatch):
 
 def test_ensure_mcp_overwrites_old_node(monkeypatch):
     calls = []
-    monkeypatch.setattr(install, "_mcp_list", lambda: "vision  claude-2  node  C:/x/mcp-vision.js")
-    monkeypatch.setattr(install, "run", lambda cmd, timeout=30: calls.append(cmd) or (0, ""))
+    registered = []
+
+    def fake_list():
+        if registered:
+            return "vision  claude-2  python  C:/x/mcp_server.py"
+        return "vision  claude-2  node  C:/x/mcp-vision.js"
+
+    def fake_run(cmd, timeout=30):
+        calls.append(cmd)
+        if "mcp add" in " ".join(cmd):
+            registered.append(True)
+        return (0, "")
+
+    monkeypatch.setattr(install, "_mcp_list", fake_list)
+    monkeypatch.setattr(install, "run", fake_run)
     ok = install.ensure_mcp()
     assert ok is True
     add = [c for c in calls if "mcp add" in " ".join(c)]

@@ -60,11 +60,6 @@ def _entry(prompt_key: str) -> dict:
     return {"text": entry.get("text", ""), "temperature": temp}
 
 
-def _clouds() -> list:
-    """所有已配置的云端平台（config.cloud.clouds）。"""
-    return config_loader.get().get("cloud", {}).get("clouds", []) or []
-
-
 def _active_cloud() -> dict | None:
     return config_loader.active_cloud()
 

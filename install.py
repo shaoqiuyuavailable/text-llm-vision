@@ -235,7 +235,7 @@ def ensure_mcp() -> bool:
     server = os.path.join(TARGET, "mcp_server.py")
     cmd = ["claude", "mcp", "add", "--scope", "user", "vision", "--", sys.executable, server]
     code, _ = run(cmd, timeout=30)
-    ok = code == 0 and "vision" in _mcp_list()
+    ok = code == 0 and "mcp_server.py" in _mcp_list()
     mark(ok, "注册 MCP server `vision`（mcp_server.py）")
     if not ok:
         print(f"   → 修复: claude mcp add --scope user vision -- {sys.executable} \"{server}\"")
