@@ -90,7 +90,9 @@ class VisionTreeProvider {
     items.push(new VisionTreeItem(`端口: ${d.port}`, 'port', '点击修改', { kind: 'port' }));
     items.push(new VisionTreeItem(`温度: ${d.ollama && d.ollama.temperature !== undefined ? d.ollama.temperature : '-'}`, 'temp', '点击修改', { kind: 'temp' }));
     items.push(new VisionTreeItem(`top_p: ${d.ollama && d.ollama.top_p !== undefined ? d.ollama.top_p : '-'}`, 'topp', '点击修改', { kind: 'topp' }));
-    items.push(new VisionTreeItem(`上游: ${d.upstream || '-'}`, 'upstream', '点击修改', { kind: 'upstream' }));
+    items.push(new VisionTreeItem(`上游(Anthropic): ${d.upstream || '-'}`, 'upstream', '点击修改', { kind: 'upstream' }));
+    items.push(new VisionTreeItem(`上游(OpenAI): ${d.upstream_openai || '(未配置)'}`, 'upstream_openai', '点击修改', { kind: 'upstream_openai' }));
+    items.push(new VisionTreeItem(`grounding: ${d.ollama && d.ollama.grounding ? '开' : '关'}`, 'grounding', '点击切换', { kind: 'grounding' }));
     items.push(new VisionTreeItem('── 云端厂商 ──', 'header', ''));
     (d.cloud || []).forEach((c) => {
       items.push(new VisionTreeItem(`${c.name}: ${c.model || '(未配model)'} key=${c.has_key ? '✓' : '✗'}`,
@@ -209,8 +211,22 @@ function activate(context) {
           }
           case 'upstream': {
             const cur = provider.status ? provider.status.upstream : '';
-            const val = await vscode.window.showInputBox({ value: cur || '', prompt: '输入上游地址（纯文本模型真实端点）' });
+            const val = await vscode.window.showInputBox({ value: cur || '', prompt: '输入 Anthropic 上游（Claude Code 链路，纯文本模型真实端点）' });
             if (val !== undefined && val.trim()) await post(baseUrl, '/api/config', { upstream: val.trim() });
+            break;
+          }
+          case 'upstream_openai': {
+            const cur = provider.status ? provider.status.upstream_openai : '';
+            const val = await vscode.window.showInputBox({ value: cur || '', prompt: '输入 OpenAI 上游基础 URL（Cline/OpenCode 链路，/v1/chat/completions 由它拼接）' });
+            if (val !== undefined && val.trim()) await post(baseUrl, '/api/config', { upstream_openai: val.trim() });
+            break;
+          }
+          case 'grounding': {
+            const cur = provider.status && provider.status.ollama ? !!provider.status.ollama.grounding : true;
+            const pick = await vscode.window.showQuickPick(
+              [{ label: '开（支持 bbox 的模型）', value: true }, { label: '关（不支持 grounding 时跳过空间结构）', value: false }],
+              { placeHolder: 'grounding 当前: ' + (cur ? '开' : '关') });
+            if (pick) await post(baseUrl, '/api/config', { ollama: { grounding: pick.value } });
             break;
           }
           case 'provider':

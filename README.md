@@ -78,7 +78,10 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
               ↳ 无 image 块 → 原样透传（含分类器等一切请求）
 ```
 
-> **上游解绑（不写死 DeepSeek）**：代理不再硬编码上游。转发前按**请求头 token 反查 CC Switch 数据库**（`providers.settings_config` 匹配 token → `provider_endpoints` 取非 localhost 的真实上游），**CC Switch 切换 provider 时自动跟随**；查不到则回退 `config.json` 的 `upstream`（默认 DeepSeek）。只有 base URL 指向本代理的纯文本模型走代理，切走即绕过。**已实测兼容的上游模型：DeepSeek、Qwen、Kimi**（CC Switch 切换后贴图识别正常，代理自动跟随 token 定位各自真实上游）。
+> **上游解绑（双链路各自解耦，不写死任何厂商）**：
+> - **Anthropic 链路**（Claude Code）：转发前按**请求头 token 反查 CC Switch 数据库**（`providers.settings_config` 匹配 token → `provider_endpoints` 取非 localhost 的真实上游），**CC Switch 切换 provider 时自动跟随**；查不到回退 `config.json` 的 `upstream`。**已实测兼容上游模型：DeepSeek、Qwen、Kimi**。
+> - **OpenAI 链路**（Cline/OpenCode/Codex）：转发到 **`config.upstream_openai`**（固定配置，默认空需自配，如 `https://api.deepseek.com`）；**不做 CC Switch 反查**（规划范围外）。
+> 只有 base URL 指向本代理的纯文本模型走代理，切走即绕过。
 
 > **长会话历史图处理**：同一请求里的 messages 可能包含多轮旧图（长对话每次都带全量历史）。代理只对**最后一条含图的 user 消息**做真识别（当前轮新增），更早的旧图统一替换为 `[历史图片已省略]` 占位——**旧图不消耗每请求 3 张的识别配额**。这样既保证纯文本模型收不到 image 块（防 ReadError），又避免长会话被历史图反复重识别拖慢/挤占当前图。
 
@@ -402,8 +405,9 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | 档位: fast (1) | 选 off/fast/standard/deep | `POST /api/level` |
 | 后端: local | 选本地/云端 + 厂商 | `POST /api/backend` |
 | 端口: 8787 | 输入端口（提示需重启） | `POST /api/backend` |
-| 温度 / top_p | 输入数值 | `POST /api/config` |
-| 上游: … | 输入地址 | `POST /api/config` |
+| 温度 / top_p / grounding | 输入数值 / 选开·关 | `POST /api/config` |
+| 上游(Anthropic) | 输入地址（Claude Code 链路） | `POST /api/config` |
+| 上游(OpenAI) | 输入地址（Cline/OpenCode 链路） | `POST /api/config` |
 | 云端厂商 | 点厂商切换 | `POST /api/backend` |
 | 代理 / ollama | 只读状态 | `GET /api/status` |
 

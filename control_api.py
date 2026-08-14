@@ -14,8 +14,9 @@ import config_loader
 import toggle
 
 STATE = toggle.STATE  # ~/.claude/vision-eyes/state
-ALLOWED_CONFIG_KEYS = {"upstream", "ollama"}
+ALLOWED_CONFIG_KEYS = {"upstream", "upstream_openai", "ollama"}
 OLLAMA_NUM_KEYS = ("temperature", "top_p")
+OLLAMA_BOOL_KEYS = ("grounding",)
 
 # ollama 服务状态缓存：get_status 被插件每 5s 轮询，若每次都 spawn `ollama list`
 # 频繁启动子进程（虽已 CREATE_NO_WINDOW 不弹窗）也是浪费。缓存 15s。
@@ -92,11 +93,13 @@ def get_status(proxy_info=None) -> dict:
         "active_provider": active,
         "port": cfg.get("port", 8787),
         "upstream": cfg.get("upstream", ""),
+        "upstream_openai": cfg.get("upstream_openai", ""),
         "ollama": {
             "url": ollama.get("url", ""),
             "model": ollama.get("model", ""),
             "temperature": ollama.get("temperature"),
             "top_p": ollama.get("top_p"),
+            "grounding": ollama.get("grounding", True),
         },
         "cloud": _cloud_list(cfg),
         "proxy": proxy_info,
@@ -154,7 +157,7 @@ def set_backend(kind, port=None, provider=None, proxy_info=None) -> dict:
 
 
 def set_config(patch, proxy_info=None) -> dict:
-    """白名单改配置：upstream / ollama.temperature / ollama.top_p。拒绝其它键。返回最新状态。"""
+    """白名单改配置：upstream / upstream_openai / ollama.{temperature,top_p,grounding}。拒绝其它键。"""
     if not isinstance(patch, dict):
         raise ValueError("patch must be an object")
     unknown = set(patch) - ALLOWED_CONFIG_KEYS
@@ -163,9 +166,11 @@ def set_config(patch, proxy_info=None) -> dict:
     cfg = toggle._read_cfg()
     if "upstream" in patch:
         cfg["upstream"] = str(patch["upstream"]).strip()
+    if "upstream_openai" in patch:
+        cfg["upstream_openai"] = str(patch["upstream_openai"]).strip()
     o = patch.get("ollama") or {}
     if isinstance(o, dict):
-        bad = set(o) - set(OLLAMA_NUM_KEYS)
+        bad = set(o) - set(OLLAMA_NUM_KEYS) - set(OLLAMA_BOOL_KEYS)
         if bad:
             raise ValueError(f"not allowed under ollama: {sorted(bad)}")
         cfg.setdefault("ollama", {})
@@ -175,5 +180,8 @@ def set_config(patch, proxy_info=None) -> dict:
                     cfg["ollama"][k] = float(o[k])
                 except (TypeError, ValueError):
                     raise ValueError(f"ollama.{k} must be numeric, got {o[k]!r}")
+        for k in OLLAMA_BOOL_KEYS:
+            if k in o:
+                cfg["ollama"][k] = bool(o[k])
     toggle._write_cfg(cfg)
     return get_status(proxy_info)
