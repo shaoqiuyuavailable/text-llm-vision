@@ -38,6 +38,23 @@ def _image_arg(args, *names):
     return ""
 
 
+def _vision_level() -> int:
+    """读视觉档位（与 proxy/toggle 同源）：~/.claude/vision-eyes/state。"""
+    try:
+        with open(os.path.expanduser("~/.claude/vision-eyes/state"), encoding="utf-8") as f:
+            return int(f.read().strip() or "1")
+    except (OSError, ValueError):
+        return 1
+
+
+_PRECISION_BY_LEVEL = {0: "fast", 1: "fast", 2: "standard", 3: "deep"}
+
+
+def _describe_precision() -> str:
+    """档位 → 识别精度（对齐代理主路径）：/vision 0-3 → off/fast/standard/deep。"""
+    return _PRECISION_BY_LEVEL.get(_vision_level(), "fast")
+
+
 def tool_describe(args):
     path = _image_arg(args, "image", "path")
     if not path:
@@ -46,13 +63,14 @@ def tool_describe(args):
         return _err(f"图片不存在: {path}")
     prompt = (args.get("prompt") or "").strip()
     mode = (args.get("mode") or "").strip()
+    precision = _describe_precision()
     if prompt:
         text = vision_client.describe(path, prompt=prompt)
     elif mode:
         # --mode 动态温度（v2）：rigorous/identity/military/anime/open
-        text = vision_client.analyze(path, mode=mode)
+        text = vision_client.analyze(path, precision, mode=mode)
     else:
-        text = vision_client.analyze(path)  # 无 mode 保持原调用（兼容）
+        text = vision_client.analyze(path, precision)  # 档位对齐主路径（F1）
     return {"content": [{"type": "text", "text": text}], "isError": False}
 
 

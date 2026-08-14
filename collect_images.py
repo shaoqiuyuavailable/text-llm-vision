@@ -34,18 +34,18 @@ import urllib.parse
 API = "https://commons.wikimedia.org/w/api.php"
 PROXY = "http://127.0.0.1:7897"
 
-# 类别映射：Wikimedia 类别名 -> (大类, 小类)
+# 类别映射：Wikimedia 类别名 -> (大类, 小类)（v2 场景体系，F6）
 CATEGORY_MAP = {
-    "People": ("person", "real"),
-    "Portrait_photographs": ("person", "real"),
-    "Selfies": ("person", "real"),
-    "Group_photographs": ("person", "group"),
-    "Anime": ("person", "anime"),
-    "Manga_illustrations": ("person", "anime"),
+    "People": ("person", "real_single"),
+    "Portrait_photographs": ("person", "real_single"),
+    "Selfies": ("person", "real_single"),
+    "Group_photographs": ("person", "real_group"),
+    "Anime": ("person", "anime_character"),
+    "Manga_illustrations": ("person", "anime_character"),
     "Animals": ("animal", ""),
-    "Cats": ("animal", ""),
-    "Dogs": ("animal", ""),
-    "Birds": ("animal", ""),
+    "Cats": ("animal", "mammal"),
+    "Dogs": ("animal", "mammal"),
+    "Birds": ("animal", "bird"),
     "Reports": ("document", "report"),
     "Documents": ("document", "report"),
     "Tables": ("document", "table"),
@@ -57,11 +57,11 @@ CATEGORY_MAP = {
     "Bar_charts": ("chart", ""),
     "Pie_charts": ("chart", ""),
     "Scatter_plots": ("chart", ""),
-    "Landscapes": ("generic", "landscape"),
-    "Mountains": ("generic", "landscape"),
-    "Objects": ("generic", "object"),
-    "Screenshots": ("generic", "screenshot"),
-    "Internet_memes": ("generic", "meme"),
+    "Landscapes": ("scene", "landscape"),
+    "Mountains": ("scene", "landscape"),
+    "Objects": ("object", ""),
+    "Screenshots": ("screenshot", ""),
+    "Internet_memes": ("meme", ""),
 }
 
 

@@ -5,7 +5,7 @@
 //
 // 无外部依赖（Node ≥ 18 内置 fetch），stdin/stdout 走 MCP 协议。
 // 注册：claude mcp add vision -e VISION_IDENTIFY_URL=http://127.0.0.1:8787 -- node "绝对路径/mcp-vision.js"
-// 注意：若用 `vision port <N>` 改了代理端口，需同步 VISION_IDENTIFY_URL 的端口。
+// 注意：若用 `vision local <N>` 改了代理端口，需同步 VISION_IDENTIFY_URL 的端口（`vision port` 子命令已并入 local）。
 
 const IDENTIFY_URL = process.env.VISION_IDENTIFY_URL || "http://127.0.0.1:8787/identify";
 

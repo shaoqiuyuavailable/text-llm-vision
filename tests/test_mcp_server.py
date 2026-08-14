@@ -37,10 +37,18 @@ def test_unknown_tool():
 def test_describe_image_calls_analyze(monkeypatch, tmp_path):
     img = tmp_path / "x.png"
     img.write_bytes(b"x")
-    monkeypatch.setattr(mcp_server.vision_client, "analyze", lambda p: f"识别:{p}")
+    calls = {}
+
+    def fake_analyze(p, precision=""):
+        calls["precision"] = precision
+        return f"识别:{p}"
+
+    monkeypatch.setattr(mcp_server.vision_client, "analyze", fake_analyze)
+    monkeypatch.setattr(mcp_server, "_describe_precision", lambda: "deep")  # 档位对齐主路径（F1）
     r = _call({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                "params": {"name": "describe_image", "arguments": {"image": str(img)}}})
     assert r["result"]["content"][0]["text"] == f"识别:{img}"
+    assert calls["precision"] == "deep"
     assert r["result"]["isError"] is False
 
 

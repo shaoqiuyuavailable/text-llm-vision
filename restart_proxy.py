@@ -15,9 +15,11 @@ import sys
 import time
 import urllib.request
 
+import config_loader  # F4：端口单一事实来源（config.json port，默认 8787）
+
 HOME = os.path.expanduser("~")
 DIR = os.path.dirname(os.path.abspath(__file__))
-PORT = 8787  # start_proxy 从 config 读真实端口；此处仅用于找 PID / health
+PORT = config_loader.get_port()  # 与代理同源，改端口后 restart 仍找对 PID / 验活 / 写 BASE_URL
 SETTINGS = os.path.join(HOME, ".claude", "settings.json")
 
 

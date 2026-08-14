@@ -11,7 +11,7 @@
 | Ollama | 任意 | 本地视觉模型运行时 |
 | 代码 | git clone | `git clone https://github.com/shaoqiuyuavailable/text-llm-vision.git` |
 | Claude Code | 可选 | 只用 Claude Code 主路径时安装（`npm i -g @anthropic-ai/claude-code`） |
-| Node.js | 可选 | **仅旧 `mcp-vision.js` 需要**；新 python MCP server 零依赖，不需要 |
+| Node.js | 可选 | **仅旧 `mcp-vision.js` 需要**；新 python MCP server 协议层零依赖（识别链路复用 vision_client），不需要 |
 
 > 云端可选手动开（DashScope/硅基流动等，配 `cloud.clouds` + key）；默认纯本地零费用。
 >

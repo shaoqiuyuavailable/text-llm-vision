@@ -35,7 +35,7 @@ STATE_DIR = os.path.expanduser("~/.claude/vision-eyes/state")
 BAK = os.path.join(STATE_DIR, "settings.json.bak.vision")  # BASE_URL 改动前备份
 SRC = os.path.dirname(os.path.abspath(__file__))           # 本文件所在目录（项目源）
 PORT = config_loader.get_port()
-PIP_DEPS = ["fastapi", "uvicorn", "httpx"]
+PIP_DEPS = ["fastapi", "uvicorn", "httpx", "Pillow", "rapidocr_onnxruntime"]  # F3：与 requirements.txt 对齐
 
 # 部署需要的文件清单（拷贝时排除 __pycache__/.git/日志/state/用户 config）
 NEEDED_FILES = [
