@@ -2,7 +2,7 @@
 
 **让没有视觉的纯文本 LLM（DeepSeek、Qwen、Kimi、GLM 等）在任意主流 AI 编码智能体（Claude Code / Cline / OpenCode / Codex）里真正"看得见"**——图片进去，文字描述出来，模型基于描述正常推理。全程本地、零 API 费用、数据不出机器。
 
-> **一句话定位**：不是一个简单的"视觉代理"，而是一个 **本地视觉增强引擎**——专为"纯文本模型 + 任意 AI 编码智能体"设计，用 **MCP + 代理 + 软规则三层互补架构** + **Scan/Zoom/Guess 三次判定流水线**，**三协议通用**（Anthropic / OpenAI Chat / OpenAI Responses），**Docker 可部署**，配 **VS Code 可视化控制面板**，把 8B 小模型的视觉潜力榨到极致。
+> **一句话定位**：不是一个简单的"视觉代理"，而是一个 **本地视觉增强引擎**——专为"纯文本模型 + 任意 AI 编码智能体"设计，用 **MCP 主路径 + 代理兜底 + 软规则三层互补架构** + **Scan/Zoom/Guess 三次判定流水线**，**三协议通用**（Anthropic / OpenAI Chat / OpenAI Responses），**Docker 可部署**，配 **VS Code 可视化控制面板**，把 8B 小模型的视觉潜力榨到极致。
 
 参考了 [glm-vision](https://github.com/shiss3/glm-vision) 的「MCP + 代理 + 软规则」三层互补架构，视觉后端落在**本地视觉模型**（默认 Qwen2.5-VL，可换任意 Ollama 视觉模型）。
 
@@ -18,6 +18,66 @@
 | 🔒 **100% 本地 & 零费用** | 本地视觉模型（默认 Qwen2.5-VL，可换），数据不出机器、不按次收费，适合敏感截图和内部文档 |
 | 🐳 **Docker 镜像化** | 独立镜像暴露 8787，容器内连宿主机 Ollama，挂载 CC Switch / config 保留双源 |
 | 🎛️ **VS Code 可视化面板** | TreeView 侧边栏实时展示/修改档位、后端、端口、温度、上游、grounding、云端厂商 |
+
+## MCP 主路径（推荐）
+
+**主路径 = MCP Tool Use**：模型主动调用 `mcp_server.py`（Python MCP server，stdio，零第三方依赖）暴露的识图工具；工具直接 import `vision_client`（Scan→Zoom→Guess 流水线），**不依赖代理、独立存活**，可挂任意支持 MCP 的宿主。**代理拦截（`proxy.py`）降级为「粘贴图兜底」**（见「代理（兜底路径）」）。注册入口：`install.py --mcp <host>`。
+
+**5 个工具**：
+
+| 工具 | 用途 | 关键参数 |
+|------|------|---------|
+| `describe_image` | 识别图片，返回文字描述（Scan→Zoom→Guess 三阶段） | `image`（路径），`prompt`（可选） |
+| `extract_text` | 提取图片全部文字（OCR 优先，回退视觉模型） | `image` |
+| `locate_object` | 定位图中元素，返回元素名 + 边界框坐标（grounding bbox） | `image` + `query` |
+| `compare_images` | 对比两张图，逐点列出异同 | `image_a` + `image_b` |
+| `vision_rules` | 返回「何时该调识图工具」的规则文本（写进宿主规则文件） | — |
+
+**注册（多宿主）**：
+
+```bash
+python install.py --mcp all       # 一次注册全部宿主
+python install.py --mcp claude    # 或指定单一宿主（claude/codex/opencode/cline/continue/copilot/cursor）
+```
+
+`install.py --mcp <host>` 以 stdio spawn `mcp_server.py`，为每个宿主写 MCP 配置 + 触发规则文件（幂等，已注册/已含规则时跳过）。
+
+**环境变量（覆盖优先级：env > config.json > 默认值）**：
+
+| 变量 | 作用 | 说明 |
+|------|------|------|
+| `VISION_MODEL` | 视觉模型名 | 覆盖 `config.json` 的 `ollama.model` |
+| `OLLAMA_URL` / `OLLAMA_BASE_URL` | Ollama 地址 | 两者等价（代码先读 `OLLAMA_URL`）；Docker 用 `OLLAMA_URL` 连宿主机 |
+| `VISION_API_KEY` | 云端 API key | 配了即切云端通道（合成 `env` 平台） |
+| `VISION_API_BASE_URL` | 云端 API base URL | 与 `VISION_API_KEY` 配套 |
+| `VISION_PROVIDER` | 强制后端 | `local` 或 `cloud`；缺省按「是否有 key」自动选 |
+
+### 多宿主注册矩阵
+
+| 宿主 | MCP 配置文件 | 触发规则文件 | 格式要点 |
+|------|-------------|-------------|---------|
+| Claude Code | `claude mcp add --scope user vision`（CLI） | `~/.claude/CLAUDE.md` | 标准 `mcpServers`（command + args） |
+| Codex | `~/.codex/config.toml` | `AGENTS.md` | `[mcp_servers.vision]` TOML 段 |
+| OpenCode | `~/.config/opencode/opencode.json` | `AGENTS.md` | ⚠️ `mcp` 键 + 数组 command + `environment`（非 `mcpServers`） |
+| Cline | `cline_mcp_settings.json`（VS Code 扩展 + CLI **双路径**） | `.clinerules` | `mcpServers`；扩展与 CLI 各自独立路径 |
+| Continue | `~/.continue/config.json` | 同文件的 `rules` 数组 | ⚠️ `mcpServers` 是**数组**（`{name, command, args}`） |
+| Copilot | `.vscode/mcp.json` | `.github/copilot-instructions.md` | ⚠️ `servers` 键 + `type:"stdio"` |
+| Cursor | `~/.cursor/mcp.json` | `AGENTS.md` | `mcpServers`（与 Claude Code 同构） |
+
+### 触发规则（软规则母版）
+
+`mcp_server.py` 的 `vision_rules` 工具返回的文本，与 `install.py --mcp` 写入各宿主规则文件的文本**同源**（母版）：
+
+```markdown
+# 视觉能力（text-llm-vision）
+你的模型没有视觉能力。出现以下情况必须调用相应工具：
+- 用户引用本地图片路径 / 粘贴截图 / 你看到 [Unsupported Image] → describe_image(图片路径)
+- 终端红字、报错栈、文档扫描 → extract_text(图片路径)
+- 图中某元素在哪里 → locate_object(图片路径, 元素名)
+- 前后两张图对比 → compare_images(图A路径, 图B路径)
+```
+
+`install.py --mcp <host>` 会把这段文本写入各宿主的规则文件（AGENTS.md / .clinerules / Continue 的 `rules` / .github/copilot-instructions.md；Claude Code 的 `~/.claude/CLAUDE.md` 已存在，追加即可）。宿主规则文件缺失、或模型不确定何时该调工具时，可让模型调用 `vision_rules` 工具取回母版文本写入。
 
 ## 使用场景
 
@@ -72,11 +132,13 @@
 
 | 层 | 组件 | 文件 | 说明 |
 |----|------|------|------|
-| ① MCP | `describe_image` 工具 | `mcp-vision.js` | 模型主动调用，调本地 `/identify` 识图。用户级注册，所有会话可用 |
+| ① MCP | 5 个工具（`describe_image` 等） | `mcp_server.py` | 模型主动调用，直接 import `vision_client` 识图（不依赖代理）。用户级注册，所有会话可用 |
 | ② 软规则 | CLAUDE.md | `~/.claude/CLAUDE.md` | 教模型「看图用 describe_image，别用 Read 图片」 |
 | ③ 代理 | 反向代理 | `proxy.py` | 拦截请求体 image 块→转文字→转发上游；无图请求零开销透传 |
 
-### 请求流转（粘贴图片）
+### 请求流转（粘贴图片 · 代理兜底路径）
+
+> 这是**兜底路径**：仅覆盖「用户把图片粘贴进对话」的场景（VS Code 扩展粘贴 → image 块直接进请求体 → 代理自动转文字）。模型**主动**读本地图片文件走 MCP 主路径（`describe_image`）。操作层（`identify.py` CLI、VS Code 面板）也复用同一识别引擎。
 
 ```
 Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──▶ [上游动态解析]
@@ -91,11 +153,14 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 > **长会话历史图处理**：同一请求里的 messages 可能包含多轮旧图（长对话每次都带全量历史）。代理只对**最后一条含图的 user 消息**做真识别（当前轮新增），更早的旧图统一替换为 `[历史图片已省略]` 占位——**旧图不消耗每请求 3 张的识别配额**。这样既保证纯文本模型收不到 image 块（防 ReadError），又避免长会话被历史图反复重识别拖慢/挤占当前图。
 
-### 请求流转（模型主动看图）
+### 请求流转（模型主动看图 · MCP 主路径）
 
 ```
-模型需要看图 → 调 describe_image(路径) → MCP → 本地 /identify → 返回文字描述
+模型需要看图 → 调 mcp_server.py 的 5 工具（describe_image / extract_text / locate_object / compare_images / vision_rules）
+            → 直接 import vision_client（Scan→Zoom→Guess）→ 本地/云端视觉模型识别 → 返回文字/bbox
 ```
+
+> **MCP 主路径 vs 代理兜底**：主路径是模型**主动**调用 `mcp_server.py`（Python MCP server，stdio，零第三方依赖）识图，识别引擎与代理共用 `vision_client`，但**不依赖代理进程、独立存活**，可挂任意支持 MCP 的宿主（Claude Code / Codex / OpenCode / Cline / Continue / Copilot / Cursor）。代理（`proxy.py`）只负责**兜底**：对话内粘贴的图片由它自动拦截转文字（见下方「请求流转（粘贴图片）」）。旧形态 `mcp-vision.js`（Node，仅 `describe_image` 一个工具）保留向后兼容，**新部署统一用 `mcp_server.py`**。
 
 ### 三协议（Anthropic + OpenAI Chat + OpenAI Responses，解除 Claude 强绑定）
 
@@ -324,14 +389,14 @@ python -m uvicorn proxy:app --port $(python read_port.py)
 >
 > 只有纯文本模型（DeepSeek / Qwen / Kimi 等）需要指向代理；其它有视觉的模型用各自真实端点，不经过代理。
 
-### 6. 注册 MCP server
+### 6. 注册 MCP server（多宿主，推荐）
 
 ```bash
-claude mcp add --scope user vision -e VISION_IDENTIFY_URL=http://127.0.0.1:8787 \
-  -- node "C:\Users\<USERNAME>\.claude\vision-eyes\mcp-vision.js"
+python install.py --mcp all       # 一次注册全部宿主（见「MCP 主路径」章节的注册矩阵）
+python install.py --mcp claude    # 或指定单一宿主
 ```
 
-> `VISION_IDENTIFY_URL` 的端口要与 `config.json` 的 `port` 一致；若用 `vision port <N>` 改了端口，需同步此处的 URL。
+> `install.py --mcp <host>` 以 stdio spawn `mcp_server.py`（Python），为宿主写 MCP 配置 + 触发规则文件（幂等）。等价的手动单宿主命令：`claude mcp add --scope user vision -- python "C:\Users\<USERNAME>\.claude\vision-eyes\mcp_server.py"`。旧形态 `mcp-vision.js`（Node）保留向后兼容，新部署统一用 `mcp_server.py`。
 
 确认：`claude mcp list` 应显示 `vision ... ✔ Connected`。
 
@@ -484,7 +549,9 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 | `batch_identify.py` | 批量识别目录 |
 | `scan_one.py` | 单图 scan JSON 输出 |
 | `collect_images.py` | Wikimedia 类别语料采集 |
-| `mcp-vision.js` | MCP server：describe_image 工具 |
+| `mcp_server.py` | MCP server（Python，主路径）：5 工具（describe_image/extract_text/locate_object/compare_images/vision_rules），import vision_client 独立存活 |
+| `mcp_hosts.py` | 多宿主 MCP 注册 + 触发规则（install.py --mcp 与 toggle.py doctor 共用） |
+| `mcp-vision.js` | 旧形态 MCP server（Node，仅 describe_image），向后兼容保留；新部署用 mcp_server.py |
 | `toggle.py` | 视觉控制：档位 0/1/2/3 + 后端 local[端口]/cloud[厂商]/list/doctor |
 | `install.py` | 一键部署：环境检测 + 自动配置（MCP/hook/CLAUDE.md/权限）+ 启动代理 + BASE_URL 备份回退 |
 | `vscode-ext/` | VS Code 可视化插件：侧边栏展示/修改配置（TreeView + extension.js + 打包脚本） |
@@ -501,7 +568,7 @@ python collect_images.py <目录> [每类张数] # 从 Wikimedia 按类别采集
 - **免费**：个人学习/研究、公司或组织**内部自用**（不对外盈利）
 - **商业需授权**：对外盈利（作为产品或服务出售、集成进收费产品、托管付费服务等）
 - 判断原则：**是否对外盈利**——内部自用免费，对外卖钱需授权
-- 覆盖全部组件：`proxy.py`、`mcp-vision.js`、`vscode-ext/`、Docker 镜像、CLI 工具
+- 覆盖全部组件：`proxy.py`、`mcp_server.py`、`mcp_hosts.py`、`mcp-vision.js`、`vscode-ext/`、Docker 镜像、CLI 工具
 
 商业授权联系：GitHub Issues。
 
