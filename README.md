@@ -1,21 +1,23 @@
 # text-llm-vision：给纯文本模型装上「本地视觉眼睛」
 
-**让没有视觉的纯文本 LLM（DeepSeek、Qwen、Kimi、GLM 等）在 Claude Code 里真正"看得见"**——图片进去，文字描述出来，模型基于描述正常推理。全程本地、零 API 费用、数据不出机器。
+**让没有视觉的纯文本 LLM（DeepSeek、Qwen、Kimi、GLM 等）在任意主流 AI 编码智能体（Claude Code / Cline / OpenCode / Codex）里真正"看得见"**——图片进去，文字描述出来，模型基于描述正常推理。全程本地、零 API 费用、数据不出机器。
 
-> **一句话定位**：不是一个简单的"视觉代理"，而是一个 **本地视觉增强引擎**——专为"纯文本模型 + 终端/IDE"场景设计，用 **MCP + 代理 + 软规则三层互补架构** + **Scan/Zoom/Guess 三次判定流水线**，把 8B 小模型的视觉潜力榨到极致，同时做到开箱即用的深度集成。
+> **一句话定位**：不是一个简单的"视觉代理"，而是一个 **本地视觉增强引擎**——专为"纯文本模型 + 任意 AI 编码智能体"设计，用 **MCP + 代理 + 软规则三层互补架构** + **Scan/Zoom/Guess 三次判定流水线**，**三协议通用**（Anthropic / OpenAI Chat / OpenAI Responses），**Docker 可部署**，配 **VS Code 可视化控制面板**，把 8B 小模型的视觉潜力榨到极致。
 
-参考了 [glm-vision](https://github.com/shiss3/glm-vision) 的「MCP + 代理 + 软规则」三层互补架构，视觉后端落在本地 Ollama + Qwen2.5-VL。
+参考了 [glm-vision](https://github.com/shiss3/glm-vision) 的「MCP + 代理 + 软规则」三层互补架构，视觉后端落在本地 Ollama + Qwen2.5-VL（模型可更换）。
 
-> **English / Keywords**: A **local vision proxy** for text-only LLMs (DeepSeek, Qwen, Kimi, GLM). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), and **CLAUDE.md soft rules**. Vision backend: **Ollama + Qwen2.5-VL** with a **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, deep **Claude Code** integration (vision level toggling, status bar, auto-start). Upstream dynamically resolved by CC Switch token — switch model and the proxy follows. Similar projects: glm-vision, ds-vision-skill-plus.
+> **English / Keywords**: A **local vision proxy** for text-only LLMs (DeepSeek, Qwen, Kimi, GLM) used by **any AI coding agent** (Claude Code / Cline / OpenCode / Codex). Three-layer design: **MCP server** (`describe_image`), **reverse proxy** (paste-image fallback), **CLAUDE.md soft rules**. **Triple protocol**: Anthropic Messages, OpenAI Chat Completions, OpenAI Responses — decoupled from any vendor. Vision backend: **Ollama + Qwen2.5-VL** (model swappable via config) with **Scan/Zoom/Guess** three-pass pipeline. **Zero API cost**, fully **local/offline**, **Docker** deployable, **VS Code** control panel. Upstream decoupled: CC Switch auto-follow (Anthropic) + config `upstream_openai` (OpenAI). Similar projects: glm-vision, ds-vision-skill-plus.
 
 ## 四大差异化卖点
 
 | 卖点 | 说明 |
 |------|------|
 | 🏗️ **三层互补架构** | MCP（模型主动识图）+ 反向代理（兜底粘贴图）+ CLAUDE.md 软规则（引导用对工具）。覆盖**所有**视觉场景，纯文本模型永远只收 text、不报错 |
-| 🎯 **三次判定流水线** | `Scan`（扫描判场景）→ `Zoom`（按场景聚焦细节）→ `Guess`（大胆推测），配合场景分层 + 温度分层，细节提取远胜竞品的"单次描述定终身" |
-| 🔒 **100% 本地 & 零费用** | 本地 Ollama + Qwen2.5-VL，数据不出机器、不按次收费，适合敏感截图和内部文档 |
-| ⚙️ **Claude Code 深度集成** | `/vision 0/1/2/3` 档位切换、状态栏实时显示、SessionStart 自动启动、超时 Masking + 历史图占位 + 隔离壳等一整套鲁棒性兜底 |
+| 🎯 **三次判定流水线** | `Scan`（扫描判场景）→ `Zoom`（按场景聚焦细节）→ `Guess`（大胆推测），配合场景分层 + 温度分层 + OCR 自动路由，细节提取远胜竞品的"单次描述定终身" |
+| 🔌 **三协议通用（解除强绑定）** | **Anthropic**（Claude Code）+ **OpenAI Chat**（Cline / OpenCode / Aider）+ **OpenAI Responses**（Codex CLI），一个代理喂所有主流 AI 编码智能体 |
+| 🔒 **100% 本地 & 零费用** | 本地 Ollama + Qwen2.5-VL（模型可换），数据不出机器、不按次收费，适合敏感截图和内部文档 |
+| 🐳 **Docker 镜像化** | 独立镜像暴露 8787，容器内连宿主机 Ollama，挂载 CC Switch / config 保留双源 |
+| 🎛️ **VS Code 可视化面板** | TreeView 侧边栏实时展示/修改档位、后端、端口、温度、上游、grounding、云端厂商 |
 
 ## 使用场景
 
@@ -25,9 +27,10 @@
 |------|------|
 | ① 用户无缝贴图 | 直接把图片粘贴进对话，模型基于图片内容回答（感知不到中间层）|
 | ② 模型自主看图 | agentic 场景，模型自己查看本地图片文件 |
-| ③ 批量图片处理 | 目录扫描、归类、批量识别 |
-| ④ 隐私 / 离线 | 图片不出机器，不经过云 API（适合敏感截图、内部文档）|
-| ⑤ 零成本 | 本地 Ollama 识别，不按次收费，高频使用不心疼 |
+| ③ 多智能体接入 | Claude Code / Cline / OpenCode / Codex 配纯文本模型时，图片统一被代理转文字 |
+| ④ 批量图片处理 | 目录扫描、归类、批量识别 |
+| ⑤ 隐私 / 离线 | 图片不出机器，不经过云 API（适合敏感截图、内部文档）|
+| ⑥ 零成本 | 本地 Ollama 识别，不按次收费，高频使用不心疼 |
 
 **不适用的场景**：
 - 需极高精度 OCR（复杂图表 / 长文档精细识别）——8B 模型不够，应换大模型 API
@@ -46,6 +49,9 @@
 | 7 | 跨模型切换不干扰 | 只有纯文本模型走代理，CC Switch 切走即绕过 |
 | 8 | 模型不占系统盘 | `OLLAMA_MODELS` 重定向到 F 盘 |
 | 9 | agentic 时序一致 | MCP `describe_image`（绕开 VS Code Read hook bug）|
+| 10 | 解除 Claude 强绑定 | 三协议入站（Anthropic/OpenAI Chat/Responses）+ 上游双链路解耦 |
+| 11 | 支持多智能体 | Cline/OpenCode/Codex 配 Base URL 指向代理即用（实测 Cline 全链路通）|
+| 12 | Docker 独立部署 | 镜像 + compose，连宿主机 Ollama，挂载 CC Switch/config |
 
 ## 架构
 
