@@ -72,7 +72,7 @@ def resolve_upstream(request: Request) -> str:
     except Exception:
         pass
     return config_loader.get().get("upstream", "https://api.deepseek.com/anthropic")
-PROXY_VERSION = "0.5.0"
+PROXY_VERSION = "0.5.1"
 LOG_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(LOG_DIR, "vision-proxy.log")
 LOG_KEEP_DAYS = 3  # 日志保留天数：超期自动清理

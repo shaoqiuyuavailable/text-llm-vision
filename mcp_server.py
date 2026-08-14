@@ -17,7 +17,7 @@ import sys
 import vision_client
 import config_loader
 
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 
 # 触发规则文本（vision_rules 工具返回；与 mcp_hosts 写入各宿主的规则同源）
 RULES_TEXT = """你的模型没有视觉能力。出现以下情况必须调用相应工具：

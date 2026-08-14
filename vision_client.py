@@ -390,6 +390,21 @@ def _parse_route_value(value: str) -> tuple[str, str]:
     return value.strip(), ""
 
 
+def _prompt_call(path_or_b64: str, prompt_key: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+    """引擎通用调用：取指定提示词条目，拼场景 header（与 zoom 同款结构），_post_b64 发送。
+
+    供 _engine_table/_engine_gui 等提示词类引擎复用——接入专业引擎（rapid-table/OmniParser）
+    时替换引擎函数体，本助手保留给其它提示词类引擎用。"""
+    e = _entry(prompt_key)
+    header = f"场景大类：{scene}"
+    if sub:
+        header += f"，小类：{sub}"
+    if scan_desc.strip():
+        header += f"\n第1次扫描的初步判断：\n{scan_desc.strip()}"
+    prompt = f"{header}\n\n请基于以上信息，按以下要求处理：\n{e['text']}"
+    return _post_b64(_to_b64(path_or_b64), prompt, e["temperature"], model=model)
+
+
 def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
     """OCR 引擎（RapidOCR）：只提取文字。提取不足返回空串 → 调用方回退 vlm。"""
     text = ocr(path_or_b64)
@@ -403,10 +418,28 @@ def _engine_vlm(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: s
     return zoom(path_or_b64, scene, sub=sub, scan_desc=scan_desc, model=model)
 
 
-# 引擎注册表：后续换专业模型 = 加函数进注册表 + 改路由表指向，analyze 不动
+def _engine_table(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+    """表格引擎：完整提取表格 → Markdown。
+
+    当前实现：VLM + 表格提取提示词（extract_table）。接入专业引擎（rapid-table /
+    PP-StructureV3）时替换本函数体，_ENGINES 与路由不用动；模型由用户按需配置（engine:model）。"""
+    return _prompt_call(path_or_b64, "extract_table", scene, sub, scan_desc, model=model)
+
+
+def _engine_gui(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+    """GUI 引擎：枚举界面可交互元素（VLM + extract_gui 提示词）。
+
+    接入专业引擎（OmniParser / UI-TARS）时替换本函数体，_ENGINES 与路由不用动；
+    模型由用户按需配置（engine:model）。"""
+    return _prompt_call(path_or_b64, "extract_gui", scene, sub, scan_desc, model=model)
+
+
+# 引擎注册表：后续换专业引擎 = 加函数进注册表 + 改路由表指向，analyze 不动
 _ENGINES = {
     "ocr": _engine_ocr,
     "vlm": _engine_vlm,
+    "table": _engine_table,  # 表格引擎（接 rapid-table 时换函数体）
+    "gui": _engine_gui,      # 界面元素引擎（接 OmniParser 时换函数体）
 }
 
 

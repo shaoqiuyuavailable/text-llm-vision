@@ -333,3 +333,91 @@ def test_post_b64_local_ignores_cloud_model(monkeypatch):
                                  "models": {"qwen2.5vl": {"type": "ollama"}}})
     vision_client._post_b64("B64", "prompt", 0.3)
     assert captured["model"] == "qwen2.5vl"  # 本地请求用 ollama.model，非 qwen-vl-plus
+
+
+# ---- 引擎特化 1/2/3：表格 / GUI / 图表（qwen 占位）----
+
+def _engine_router():
+    return {"document.chat": "ocr", "document.code": "ocr",
+            "document.table": "table", "chart": "vlm",
+            "screenshot.software_ui": "gui", "_default": "vlm"}
+
+
+def _engine_cfg():
+    import config_loader
+    return {
+        "router": _engine_router(),
+        "prompts": {
+            "extract_table": {"text": "把表格完整转为 Markdown，逐格提取，禁止编造。", "temperature": 0.2},
+            "extract_gui": {"text": "枚举界面所有可交互元素，逐个给功能描述。", "temperature": 0.3},
+            "zoom_chart": {"text": "先转表再给结论。", "temperature": 0.3},
+            "zoom_generic": {"text": "通用。", "temperature": 0.3},
+        },
+        "ollama": {"model": "qwen2.5vl", "temperature": 0.5},
+    }
+
+
+def test_route_engine_new_scenes(monkeypatch):
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: {"router": _engine_router()})
+    assert vision_client._route_engine("document", "table") == "table"
+    assert vision_client._route_engine("screenshot", "software_ui") == "gui"
+    assert vision_client._route_engine("chart", "") == "vlm"   # chart 大类键命中
+    assert vision_client._route_engine("chart", "bar") == "vlm"
+
+
+def test_parse_route_value_table_gui():
+    assert vision_client._parse_route_value("table:qwen2.5vl") == ("table", "qwen2.5vl")
+    assert vision_client._parse_route_value("gui:qwen2.5vl") == ("gui", "qwen2.5vl")
+
+
+def test_analyze_document_table_uses_extract_table_prompt(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature, model=""):
+        captured["prompt"] = prompt
+        return "| 列A | 列B |\n|---|---|\n| 1 | 2 |"
+
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _engine_cfg())
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("表格", "document", "table"))
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: (_ for _ in ()).throw(AssertionError("表格不应走 zoom")))
+    out = vision_client.analyze("/tmp/x.png", "standard")
+    assert "| 列A |" in out                       # 走表格引擎（占位 VLM 提示词）
+    assert "Markdown" in captured["prompt"] or "表格" in captured["prompt"]
+    assert "不应走 zoom" not in out
+
+
+def test_analyze_screenshot_software_ui_uses_gui_prompt(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature, model=""):
+        captured["prompt"] = prompt
+        return "按钮: 登录（顶部右侧，登录操作）"
+
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _engine_cfg())
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("界面", "screenshot", "software_ui"))
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: (_ for _ in ()).throw(AssertionError("UI 不应走 zoom")))
+    out = vision_client.analyze("/tmp/x.png", "standard")
+    assert "登录" in out
+    assert "可交互" in captured["prompt"] or "元素" in captured["prompt"]
+
+
+def test_engine_table_passes_model_override(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature, model=""):
+        captured["model"] = model
+        return "ok"
+
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _engine_cfg())
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    vision_client._engine_table("/tmp/x.png", "document", "table", "", model="llava")
+    assert captured["model"] == "llava"  # 引擎模型透传（v1.5 engine:model）

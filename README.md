@@ -522,6 +522,7 @@ curl http://localhost:8787/api/status # 状态（ollama_service 走 HTTP 探测�
   python toggle.py model replace <旧> <新>           # 改 router 里所有引用
   ```
 - **面板**：VS Code 扩展「模型管理」区——模型列表（点击下载/逻辑删/物理删/替换）+ 场景映射（router 每场景当前引擎:模型）
+- **内置场景特化引擎**（基线路由已配，模型由你按需拉取配置）：`document.table → table`（表格→Markdown 提取）、`screenshot.software_ui → gui`（界面元素枚举）、`chart`（Table-First 先转表再取值）。接入专业引擎时**只换引擎函数体或改绑路由值**，面板不用动——如 `table` 换 rapid-table / PP-StructureV3、`gui` 换 OmniParser，用 `toggle.py model add/download <模型>` 拉取后改绑 `engine:model`
 - **兜底 + 日志**：引擎未注册 / 模型未拉取 / 识别失败 → **回退全局模型**（不报错），回退事件记入 `vision-proxy.log`（proxy/MCP 进程都接）
 
 ## 命令行工具

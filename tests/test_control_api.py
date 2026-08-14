@@ -47,3 +47,14 @@ def test_get_status_includes_scene_exec(monkeypatch):
     st = control_api.get_status()
     assert st["scene_exec"]["document.chat"] == "RapidOCR(内置)"
     assert st["scene_exec"]["_default"] == "qwen2.5vl"
+
+
+def test_scene_exec_table_gui_routes_show_model(monkeypatch):
+    # 特化引擎无显式模型 → 显示全局模型（非 RapidOCR）
+    monkeypatch.setattr(config_loader, "get",
+                        lambda: _cfg(router={"document.table": "table",
+                                             "screenshot.software_ui": "gui"}))
+    monkeypatch.setattr(config_loader, "use_cloud", lambda: False)
+    out = control_api._scene_exec(config_loader.get())
+    assert out["document.table"] == "qwen2.5vl"
+    assert out["screenshot.software_ui"] == "qwen2.5vl"
