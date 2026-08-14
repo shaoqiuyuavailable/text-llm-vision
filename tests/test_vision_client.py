@@ -35,3 +35,16 @@ def test_compare_three_calls(monkeypatch):
     assert calls[2][0] == "post"
     assert "【图A】" in out and "【图B】" in out and "【对比】" in out
     assert "desc:b.png" in calls[2][1]  # 图B描述注入对比 prompt
+
+
+def test_use_cloud_provider_override(monkeypatch):
+    monkeypatch.setattr(vision_client, "_cloud_key", lambda: "sk")
+    monkeypatch.delenv("VISION_PROVIDER", raising=False)
+    assert vision_client._use_cloud() is True
+    monkeypatch.setenv("VISION_PROVIDER", "local")
+    assert vision_client._use_cloud() is False
+    monkeypatch.setenv("VISION_PROVIDER", "cloud")
+    assert vision_client._use_cloud() is True
+    monkeypatch.setattr(vision_client, "_cloud_key", lambda: "")
+    monkeypatch.delenv("VISION_PROVIDER", raising=False)
+    assert vision_client._use_cloud() is False

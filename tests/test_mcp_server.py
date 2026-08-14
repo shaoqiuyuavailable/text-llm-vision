@@ -44,6 +44,24 @@ def test_describe_image_calls_analyze(monkeypatch, tmp_path):
     assert r["result"]["isError"] is False
 
 
+def test_describe_image_prompt_routes_to_describe(monkeypatch, tmp_path):
+    img = tmp_path / "x.png"
+    img.write_bytes(b"x")
+    calls = {}
+
+    def fake_describe(p, prompt=""):
+        calls["prompt"] = prompt
+        return f"DESCRIBE:{prompt}"
+
+    monkeypatch.setattr(mcp_server.vision_client, "analyze", lambda p: "ANALYZE")
+    monkeypatch.setattr(mcp_server.vision_client, "describe", fake_describe)
+    r = _call({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+               "params": {"name": "describe_image", "arguments": {"image": str(img), "prompt": "数数几个人"}}})
+    assert r["result"]["content"][0]["text"] == "DESCRIBE:数数几个人"
+    assert r["result"]["isError"] is False
+    assert calls["prompt"] == "数数几个人"
+
+
 def test_describe_image_missing_or_bad_path(tmp_path):
     r = _call({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                "params": {"name": "describe_image", "arguments": {}}})

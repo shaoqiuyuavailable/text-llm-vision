@@ -99,6 +99,16 @@ def _cloud_key() -> str:
     return _cloud_key_of(c) if c else ""
 
 
+def _use_cloud() -> bool:
+    """是否走云端：任一平台有 key 默认云端；VISION_PROVIDER 可强制 local/cloud。"""
+    provider = os.environ.get("VISION_PROVIDER", "").strip()
+    if provider == "local":
+        return False
+    if provider == "cloud":
+        return True
+    return bool(_cloud_key())
+
+
 def _post_cloud(b64: str, prompt: str, temperature: float) -> str:
     """云端通道：按当前激活平台发 OpenAI 兼容 /chat/completions。"""
     c = _active_cloud()
@@ -131,7 +141,7 @@ def _post_cloud(b64: str, prompt: str, temperature: float) -> str:
 def _post_b64(b64: str, prompt: str, temperature: float) -> str:
     cfg = config_loader.get()
     o = cfg["ollama"]
-    use_cloud = bool(_cloud_key())  # 任一平台配了 key 走云端，否则纯本地
+    use_cloud = _use_cloud()  # 任一平台配了 key 走云端，否则纯本地（VISION_PROVIDER 可强制覆盖）
     # 缓存只在 deep 档(3)启用：fast/standard 收益趋近于零，deep 多次调用才值得。
     use_cache = _cache_on()
     ac = _active_cloud()

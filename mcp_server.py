@@ -44,7 +44,12 @@ def tool_describe(args):
         return _err("缺少 image 参数（图片路径）")
     if not os.path.isfile(path):
         return _err(f"图片不存在: {path}")
-    return {"content": [{"type": "text", "text": vision_client.analyze(path)}], "isError": False}
+    prompt = (args.get("prompt") or "").strip()
+    if prompt:
+        text = vision_client.describe(path, prompt=prompt)
+    else:
+        text = vision_client.analyze(path)
+    return {"content": [{"type": "text", "text": text}], "isError": False}
 
 
 def tool_extract_text(args):
