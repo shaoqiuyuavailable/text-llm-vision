@@ -57,7 +57,8 @@ def _defaults() -> dict:
         "scenes": {k: dict(v) for k, v in getattr(_prompts, "SCENES", {}).items()},
         "prompts": {k: dict(v) for k, v in _prompts.PROMPTS.items()},
         "modes": dict(getattr(_prompts, "MODES", {})),  # --mode 动态温度表（v2）
-        "router": dict(getattr(_prompts, "ROUTER", {})),  # 视觉路由器：scene → 引擎
+        "router": dict(getattr(_prompts, "ROUTER", {})),  # 视觉路由器：scene → 引擎[:模型]
+        "models": dict(getattr(_prompts, "MODELS", {})),  # 模型注册表：name → {type, provider, purpose}
     }
 
 
@@ -104,6 +105,8 @@ def get() -> dict:
                     cfg["modes"].update(data["modes"])
                 if isinstance(data.get("router"), dict):
                     cfg["router"].update(data["router"])
+                if isinstance(data.get("models"), dict):
+                    cfg["models"].update(data["models"])
                 if isinstance(data.get("scenes"), dict):
                     for k, v in data["scenes"].items():
                         if isinstance(v, dict):

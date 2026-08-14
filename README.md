@@ -506,6 +506,24 @@ curl http://localhost:8787/api/status # 状态（ollama_service 走 HTTP 探测�
 
 > Windows 路径含空格（如 `C:\Users\shaoqiu yu`）时，compose 用 `${HOME}` 展开；异常则改完整路径。OpenAI 客户端经系统代理访问 `localhost:8787` 可能被代理劫持，需在客户端关闭 localhost 代理或设 `trust_env=false`。
 
+## 多路由模型管理（v1.5）
+
+**按场景配模型**（本地 Ollama / 云端厂商都支持），场景与模型**解耦由用户自行配置**——路由器只解析执行，不预设绑定。
+
+- **路由表**：router 值 = `引擎` 或 `引擎:模型`（如 `"screenshot": "vlm:ui-r1-e-3b"`），模型名须在 `models` 注册表；缺省回退全局 `ollama.model`
+- **模型注册表**（config `models`，本地+云端）：`{"qwen2.5vl": {"type":"ollama","purpose":"default"}, "qwen-vl-plus": {"type":"cloud","provider":"dashscope"}}`（type: `ollama`/`cloud`/`pip`）
+- **CLI**（删除分逻辑/物理两档，操作写 `vision-model.log`）：
+  ```
+  python toggle.py model list                        # 模型/type/状态(已拉取?)/被引用场景
+  python toggle.py model add <name> --type ollama|cloud|pip [--provider x] [--download]
+  python toggle.py model download <name>             # ollama pull / pip install / 云端=标记
+  python toggle.py model rm <name>                   # 逻辑删除：仅移出 config（可恢复）
+  python toggle.py model rm <name> --physical --yes  # 物理删除：config + ollama rm（不可逆）
+  python toggle.py model replace <旧> <新>           # 改 router 里所有引用
+  ```
+- **面板**：VS Code 扩展「模型管理」区——模型列表（点击下载/逻辑删/物理删/替换）+ 场景映射（router 每场景当前引擎:模型）
+- **兜底 + 日志**：引擎未注册 / 模型未拉取 / 识别失败 → **回退全局模型**（不报错），回退事件记入 `vision-proxy.log`（proxy/MCP 进程都接）
+
 ## 命令行工具
 
 ```

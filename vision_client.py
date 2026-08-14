@@ -11,12 +11,15 @@
 """
 import base64
 import hashlib
+import logging
 import os
 import re
 import threading
 import httpx
 
 import config_loader
+
+log = logging.getLogger("vision_client")  # 引擎回退/模型缺失日志；proxy/MCP 进程 attach handler
 
 _cache = {}
 MAX_CACHE = 100  # 缓存上限：防内存无限膨胀，超出清最旧（FIFO）
@@ -93,9 +96,19 @@ def _use_cloud() -> bool:
     return config_loader.use_cloud()
 
 
-def _post_cloud(b64: str, prompt: str, temperature: float) -> str:
-    """云端通道：按当前激活平台发 OpenAI 兼容 /chat/completions。"""
+def _cloud_of(name: str) -> dict | None:
+    """按名字找 cloud.clouds 里的厂商（v1.5 模型级云端路由）。"""
+    for c in config_loader.get().get("cloud", {}).get("clouds", []):
+        if c.get("name") == name:
+            return c
+    return None
+
+
+def _post_cloud(b64: str, prompt: str, temperature: float, provider: str = "") -> str:
+    """云端通道：按当前激活平台（provider 空）或指定厂商（v1.5 模型级）发 OpenAI 兼容 /chat/completions。"""
     c = _active_cloud()
+    if provider:
+        c = _cloud_of(provider)
     if not c:
         raise RuntimeError("no active cloud platform configured")
     base = (c.get("base_url") or "").rstrip("/")
@@ -122,25 +135,31 @@ def _post_cloud(b64: str, prompt: str, temperature: float) -> str:
     return data["choices"][0]["message"]["content"].strip()
 
 
-def _post_b64(b64: str, prompt: str, temperature: float) -> str:
+def _post_b64(b64: str, prompt: str, temperature: float, model: str = "") -> str:
+    """识别请求。model 非空（v1.5 模型级覆盖，router 值 "引擎:模型"）时优先于全局后端判断：
+    models 表 type=cloud → 走云端该厂商；否则本地 Ollama 用该模型（覆盖全局 ollama.model）。"""
     cfg = config_loader.get()
     o = cfg["ollama"]
-    use_cloud = _use_cloud()  # 任一平台配了 key 走云端，否则纯本地（VISION_PROVIDER 可强制覆盖）
+    mdef = cfg.get("models", {}).get(model, {}) if model else {}
+    # 显式指定模型：cloud 类型 → 云端该厂商；ollama/未注册 → 本地该模型。空 model 用全局判断。
+    use_cloud = (mdef.get("type") == "cloud") if model else _use_cloud()
     # 缓存只在 deep 档(3)启用：fast/standard 收益趋近于零，deep 多次调用才值得。
     use_cache = _cache_on()
     ac = _active_cloud()
-    model = (ac.get("model") if ac else "") or o["model"]  # key 区分本地/云端
+    # 生效模型：显式模型优先；否则云端 active 模型；否则全局 ollama.model
+    eff_model = model or ((ac.get("model") if ac else "") or o["model"])
     if use_cache:
         # 缓存 key 含 model + temperature：换模型/改温度后不命中旧缓存（防拿过期结果）
-        key = hashlib.sha256((model + "|" + b64 + "|" + prompt + "|" + str(temperature)).encode()).hexdigest()
+        key = hashlib.sha256((eff_model + "|" + b64 + "|" + prompt + "|" + str(temperature)).encode()).hexdigest()
         with _cache_lock:
             if key in _cache:
                 return _cache[key]
     if use_cloud:
-        text = _post_cloud(b64, prompt, temperature)
+        provider = mdef.get("provider", "") if model else ""
+        text = _post_cloud(b64, prompt, temperature, provider=provider)
     else:
         with _OLLAMA_SEM:  # 并发上限 2，防本地单卡雪崩
-            r = httpx.post(o["url"], json={"model": o["model"], "prompt": prompt, "images": [b64],
+            r = httpx.post(o["url"], json={"model": eff_model, "prompt": prompt, "images": [b64],
                                            "stream": False, "options": {"temperature": temperature,
                                                                         "top_p": o["top_p"]}},
                            timeout=120, trust_env=False)
@@ -301,11 +320,11 @@ def _grounding_enabled() -> bool:
     return config_loader.get().get("ollama", {}).get("grounding", True)
 
 
-def _grounding(path_or_b64: str, prompt: str, temperature: float) -> str:
+def _grounding(path_or_b64: str, prompt: str, temperature: float, model: str = "") -> str:
     """grounding 请求：计算图片尺寸 + _post_b64 + 追加【原图尺寸】。spatial()/locate() 共用。"""
     img_path = path_or_b64 if os.path.exists(path_or_b64) else ""
     size = _image_size(img_path) if img_path else ""
-    text = _post_b64(_to_b64(path_or_b64), prompt, temperature)
+    text = _post_b64(_to_b64(path_or_b64), prompt, temperature, model=model)
     if size:
         text += f"\n【原图尺寸】{size}"
     return text
@@ -340,10 +359,10 @@ def compare(path_a: str, path_b: str, precision: str = "") -> str:
     return f"【图A】\n{desc_a}\n\n【图B】\n{desc_b}\n\n【对比】\n{text}"
 
 
-def spatial(path_or_b64: str) -> str:
-    """空间结构识别（grounding）：输出元素名 + bbox 坐标 + 图片尺寸。"""
+def spatial(path_or_b64: str, model: str = "") -> str:
+    """空间结构识别（grounding）：输出元素名 + bbox 坐标 + 图片尺寸。model 指定时用该模型。"""
     e = _entry("spatial")
-    return _grounding(path_or_b64, e["text"], e["temperature"])
+    return _grounding(path_or_b64, e["text"], e["temperature"], model=model)
 
 
 # ---- 视觉路由器 v1：按 scan 场景选引擎（当前 VLM 统一 qwen2.5vl，后续换专业模型只改路由表）----
@@ -359,7 +378,17 @@ def _route_engine(scene: str, sub: str) -> str:
     return table.get("_default", "vlm")
 
 
-def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str) -> str:
+def _parse_route_value(value: str) -> tuple[str, str]:
+    """路由值 "引擎" | "引擎:模型" → (engine, model)。模型空 = 用全局（场景-模型解耦，用户自行配置）。"""
+    if not value:
+        return "vlm", ""
+    if ":" in value:
+        engine, model = value.split(":", 1)
+        return (engine.strip() or "vlm"), model.strip()
+    return value.strip(), ""
+
+
+def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
     """OCR 引擎（RapidOCR）：只提取文字。提取不足返回空串 → 调用方回退 vlm。"""
     text = ocr(path_or_b64)
     if len(text) >= 20:
@@ -367,9 +396,9 @@ def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str) -> str:
     return ""
 
 
-def _engine_vlm(path_or_b64: str, scene: str, sub: str, scan_desc: str) -> str:
-    """VLM 引擎（当前统一 qwen2.5vl）：走 zoom 按类提示词。"""
-    return zoom(path_or_b64, scene, sub=sub, scan_desc=scan_desc)
+def _engine_vlm(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+    """VLM 引擎：走 zoom 按类提示词。model 非空时用指定模型（本地 ollama / 云端厂商）。"""
+    return zoom(path_or_b64, scene, sub=sub, scan_desc=scan_desc, model=model)
 
 
 # 引擎注册表：后续换专业模型 = 加函数进注册表 + 改路由表指向，analyze 不动
@@ -379,14 +408,17 @@ _ENGINES = {
 }
 
 
-def _run_engine(engine: str, path_or_b64: str, scene: str, sub: str, scan_desc: str) -> str:
-    """调引擎：未注册 / 异常返回空串（调用方回退 vlm，不报错）。"""
+def _run_engine(engine: str, path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+    """调引擎：未注册 / 异常返回空串（调用方回退 vlm，不报错）。回退记 warning 日志（兜底 + 可诊断）。"""
     fn = _ENGINES.get(engine)
     if fn is None:
+        log.warning("router: 引擎 %r 未注册（scene=%s.%s），回退 vlm", engine, scene, sub)
         return ""
     try:
-        return fn(path_or_b64, scene, sub, scan_desc)
-    except Exception:
+        return fn(path_or_b64, scene, sub, scan_desc, model=model)
+    except Exception as e:
+        log.warning("router: 引擎 %s 异常 %s: %s（scene=%s.%s model=%s），回退 vlm",
+                    engine, type(e).__name__, e, scene, sub, model or "-")
         return ""
 
 
@@ -406,25 +438,26 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
         # fast 也走 scan：1 次调用即含描述+类别（scan 提示词自带描述要求），供 scene 推理
         desc, scene, sub = scan(path_or_b64)
         return f"【初步判断】{desc}\n【场景】{scene}"
-    # standard / deep：先 scan 判场景，再按路由表选引擎（视觉路由器 v1）
+    # standard / deep：先 scan 判场景，再按路由表选引擎（视觉路由器 v1.5）
     desc, scene, sub = scan(path_or_b64)
-    # 路由：scene(.sub) → 引擎。document.chat/code → OCR；其余 → VLM(qwen2.5vl)。
-    # 引擎未注册 / 异常 / 输出不足 → 回退 vlm（沿用现有容错，不报错）。
-    engine = _route_engine(scene, sub)
-    facts = _run_engine(engine, path_or_b64, scene, sub, desc)
+    # 路由：scene(.sub) → "引擎" | "引擎:模型"（用户自行配置，场景与模型解耦）。
+    # 引擎未注册 / 异常 / 输出不足 / 模型缺失 → 回退全局 vlm（兜底 + log.warning）。
+    engine, model = _parse_route_value(_route_engine(scene, sub))
+    facts = _run_engine(engine, path_or_b64, scene, sub, desc, model=model)
     ocr_used = bool(facts and engine == "ocr")
     if not facts:
+        model = ""  # 指定模型失败/缺失 → guess/spatial 也用全局模型
         facts = _run_engine("vlm", path_or_b64, scene, sub, desc) or "[识别失败（引擎异常），已回退]"
     if precision == "standard":
         tag = "[OCR]" if ocr_used else "[视觉]"
         return f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}"
-    # deep：再加 guess + 空间结构（grounding bbox）
-    guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc, mode=mode)
+    # deep：再加 guess + 空间结构（grounding bbox），透传场景模型
+    guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc, mode=mode, model=model)
     # 模型无关：config ollama.grounding 控制是否启用 grounding（换不支持 bbox 的模型时设 false 跳过）
     spatial_out = ""
     if config_loader.get().get("ollama", {}).get("grounding", True):
         try:
-            spatial_out = spatial(path_or_b64)
+            spatial_out = spatial(path_or_b64, model=model)
         except Exception:
             spatial_out = ""  # grounding 失败不影响主体
     tag = "[OCR]" if ocr_used else "[视觉]"
@@ -447,11 +480,11 @@ def scan(path_or_b64: str) -> tuple[str, str, str]:
     return text, main, sub
 
 
-def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str = "") -> str:
+def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str = "", model: str = "") -> str:
     """第2次：按大类选 zoom 清单，小类作为上下文注入。
 
     scene 能否 zoom 取决于有没有 zoom_<scene> 提示词；缺失（如 config 新增类漏配）回退 generic，
-    避免发「只有 header、正文空」的请求。"""
+    避免发「只有 header、正文空」的请求。model 非空时用指定模型（v1.5 场景模型）。"""
     if f"zoom_{scene}" not in config_loader.get()["prompts"]:
         scene = "generic"
     e = _entry(f"zoom_{scene}")
@@ -462,14 +495,15 @@ def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str
     if scan_desc.strip():
         header += f"\n第1次扫描的初步判断：\n{scan_desc.strip()}"
     prompt = f"{header}\n\n请基于以上信息，按以下清单逐项提取更精确的事实：\n{e['text']}"
-    return _post_b64(_to_b64(path_or_b64), prompt, e["temperature"])
+    return _post_b64(_to_b64(path_or_b64), prompt, e["temperature"], model=model)
 
 
 def guess(path_or_b64: str, context: str = "", scene: str = "", sub: str = "",
-          scan_desc: str = "", mode: str = "") -> str:
+          scan_desc: str = "", mode: str = "", model: str = "") -> str:
     """第3次：基于 scan 描述 + zoom 事实 + 场景，大胆推测。
 
-    mode 走 config modes 表动态覆盖 guess 温度（--mode / describe_image mode）；缺省用提示词温度。"""
+    mode 走 config modes 表动态覆盖 guess 温度（--mode / describe_image mode）；缺省用提示词温度。
+    model 非空时用指定模型（v1.5 场景模型）。"""
     e = _entry("guess")
     temp = _mode_temperature(mode)
     if temp is None:
@@ -483,4 +517,4 @@ def guess(path_or_b64: str, context: str = "", scene: str = "", sub: str = "",
         prompt += f"\n\n第1次扫描的初步判断：\n{scan_desc.strip()}"
     if context.strip():
         prompt += f"\n\n已提取的事实特征：\n{context.strip()}"
-    return _post_b64(_to_b64(path_or_b64), prompt, temp)
+    return _post_b64(_to_b64(path_or_b64), prompt, temp, model=model)

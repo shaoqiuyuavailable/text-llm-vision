@@ -167,3 +167,22 @@ def test_prompts_version_2_overlays(monkeypatch, tmp_path):
     assert cfg["modes"]["identity"] == 0.55
     assert "extra" in cfg["scenes"]
     assert "vehicle" in cfg["scenes"]  # 基线 + 覆盖并存
+
+
+def test_models_gate_and_overlay(monkeypatch, tmp_path):
+    _write_config(monkeypatch, tmp_path, {
+        "prompts_version": 2,
+        "models": {"llava": {"type": "ollama", "purpose": "light"}},
+    })
+    cfg = config_loader.get()
+    assert "qwen2.5vl" in cfg["models"]            # 基线模型在
+    assert cfg["models"]["llava"]["type"] == "ollama"  # config 叠加
+
+
+def test_models_skipped_for_v1_config(monkeypatch, tmp_path):
+    # v1 config 无 prompts_version → models 用基线（v1 结构的 models 不叠加）
+    _write_config(monkeypatch, tmp_path, {
+        "models": {"custom": {"type": "ollama"}},
+    })
+    cfg = config_loader.get()
+    assert "custom" not in cfg["models"]

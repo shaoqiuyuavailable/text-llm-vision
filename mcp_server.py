@@ -10,6 +10,7 @@
 运行：python mcp_server.py
 """
 import json
+import logging
 import os
 import sys
 
@@ -28,6 +29,23 @@ RULES_TEXT = """你的模型没有视觉能力。出现以下情况必须调用�
 
 def _err(msg):
     return {"content": [{"type": "text", "text": msg}], "isError": True}
+
+
+def _setup_logging():
+    """MCP 进程：让 vision_client 的引擎回退/模型缺失日志进 vision-proxy.log（兜底可诊断）。"""
+    vclog = logging.getLogger("vision_client")
+    if vclog.handlers:
+        return
+    try:
+        logfile = os.path.expanduser("~/.claude/vision-eyes/vision-proxy.log")
+        d = os.path.dirname(logfile)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        h = logging.FileHandler(logfile, encoding="utf-8")
+        h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s %(message)s"))
+        vclog.addHandler(h)
+    except OSError:
+        pass
 
 
 def _image_arg(args, *names):
@@ -218,6 +236,7 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, OSError):
         pass
+    _setup_logging()  # v1.5：引擎回退日志写 vision-proxy.log
     # 启动日志写 stderr（stdout 是协议通道，不能污染）
     try:
         backend = config_loader.resolve_backend()

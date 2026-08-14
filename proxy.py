@@ -94,16 +94,20 @@ def _setup_logging():
     logger = logging.getLogger("vision_proxy")
     logger.setLevel(logging.INFO)
     logger.propagate = False
-    if logger.handlers:  # 防重复挂 handler（热重载等）
-        return logger
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
-    fh = TimedRotatingFileHandler(LOG_FILE, when="midnight", interval=1,
-                                  backupCount=LOG_KEEP_DAYS, encoding="utf-8")
-    fh.setFormatter(fmt)
-    logger.addHandler(fh)
-    sh = logging.StreamHandler()  # 同时上屏，实时可看
-    sh.setFormatter(fmt)
-    logger.addHandler(sh)
+    if not logger.handlers:  # 防重复挂 handler（热重载等）
+        fh = TimedRotatingFileHandler(LOG_FILE, when="midnight", interval=1,
+                                      backupCount=LOG_KEEP_DAYS, encoding="utf-8")
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+        sh = logging.StreamHandler()  # 同时上屏，实时可看
+        sh.setFormatter(fmt)
+        logger.addHandler(sh)
+    # v1.5：vision_client 的引擎回退/模型缺失日志进同一文件（兜底可诊断）
+    vclog = logging.getLogger("vision_client")
+    vclog.setLevel(logging.INFO)
+    if not vclog.handlers:
+        vclog.addHandler(logger.handlers[0])
     return logger
 
 

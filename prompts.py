@@ -32,13 +32,19 @@ PROMPTS_VERSION = 2  # config.json 的 prompts_version>=2 才叠加 scenes/promp
 # 动态温度模式表：--mode <名> 覆盖 guess 温度（对应 v2 用途区间中值）
 MODES = {"rigorous": 0.3, "identity": 0.5, "military": 0.6, "anime": 0.7, "open": 0.8}
 
-# 视觉路由器：scene(.sub) → 引擎名。匹配：scene.sub 精确 → scene 大类 → _default。
-# v1 阶段所有 VLM 类路由统一 qwen2.5vl（引擎 "vlm"）；后续换专业模型只改这张表：
-#   "table": "rapidtable" / "screenshot": "gui"（并在 vision_client._ENGINES 注册对应引擎）
+# 视觉路由器：scene(.sub) → "引擎" | "引擎:模型"。匹配：scene.sub 精确 → scene 大类 → _default。
+# v1.5：模型名由用户自行填写（场景与模型解耦）；"vlm:模型" 时模型名须在 MODELS 表。
+# 系统不预设场景-模型绑定，全部由用户配置。
 ROUTER = {
     "document.chat": "ocr",   # 纯文字 → RapidOCR（保留现有行为）
     "document.code": "ocr",
     "_default": "vlm",
+}
+
+# 模型注册表：name → {type, provider?, purpose}。用户按场景配模型（router 值 "引擎:模型"）。
+# type: ollama（本地 Ollama）/ cloud（云端厂商，provider 指向 cloud.clouds）/ pip（如 rapid-table）
+MODELS = {
+    "qwen2.5vl": {"type": "ollama", "purpose": "default"},
 }
 
 SCENES = {

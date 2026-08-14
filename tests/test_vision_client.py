@@ -5,7 +5,7 @@ def test_locate_injects_query(monkeypatch):
     monkeypatch.setattr(vision_client, "_grounding_enabled", lambda: True)
     captured = {}
 
-    def fake_post(b64, prompt, temperature):
+    def fake_post(b64, prompt, temperature, model=""):
         captured["prompt"] = prompt
         return '[{"name":"提交按钮","bbox":[100,200,300,400]}]'
 
@@ -23,7 +23,7 @@ def test_compare_three_calls(monkeypatch):
         calls.append(("analyze", path))
         return f"desc:{path}"
 
-    def fake_post(b64, prompt, temperature):
+    def fake_post(b64, prompt, temperature, model=""):
         calls.append(("post", prompt))
         return "差异要点"
 
@@ -64,7 +64,7 @@ def test_locate_grounding_disabled_returns_hint(monkeypatch):
 def test_spatial_uses_grounding(monkeypatch):
     captured = {}
     monkeypatch.setattr(vision_client, "_grounding_enabled", lambda: True)
-    monkeypatch.setattr(vision_client, "_grounding", lambda p, prompt, temp: captured.update(prompt=prompt) or "OK")
+    monkeypatch.setattr(vision_client, "_grounding", lambda p, prompt, temp, model="": captured.update(prompt=prompt) or "OK")
     vision_client.spatial("/tmp/x.png")
     assert "spatial" in captured.get("prompt", "") or captured.get("prompt")  # _entry("spatial") 文本
 
@@ -116,7 +116,7 @@ def test_scan_applies_default_sub(monkeypatch):
 def test_zoom_uses_new_scene_prompt(monkeypatch):
     captured = {}
 
-    def fake_post(b64, prompt, temperature):
+    def fake_post(b64, prompt, temperature, model=""):
         captured["prompt"] = prompt
         return "OK"
 
@@ -129,7 +129,7 @@ def test_zoom_uses_new_scene_prompt(monkeypatch):
 def test_zoom_missing_prompt_falls_back_generic(monkeypatch):
     captured = {}
 
-    def fake_post(b64, prompt, temperature):
+    def fake_post(b64, prompt, temperature, model=""):
         captured["prompt"] = prompt
         return "OK"
 
@@ -148,7 +148,7 @@ def test_mode_temperature(monkeypatch):
 def test_guess_mode_overrides_temperature(monkeypatch):
     captured = {}
 
-    def fake_post(b64, prompt, temperature):
+    def fake_post(b64, prompt, temperature, model=""):
         captured["temperature"] = temperature
         return "推测"
 
@@ -163,8 +163,9 @@ def test_guess_mode_overrides_temperature(monkeypatch):
 def test_analyze_passes_mode_to_guess(monkeypatch):
     captured = {}
 
-    def fake_guess(path, context="", scene="", sub="", scan_desc="", mode=""):
+    def fake_guess(path, context="", scene="", sub="", scan_desc="", mode="", model=""):
         captured["mode"] = mode
+        captured["model"] = model
         return "推测"
 
     monkeypatch.setattr(vision_client, "guess", fake_guess)
@@ -237,3 +238,66 @@ def test_analyze_vlm_engine_error_returns_placeholder(monkeypatch):
     monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     out = vision_client.analyze("/tmp/x.png", "standard")
     assert "识别失败" in out or "回退" in out
+
+
+# ---- v1.5：路由值解析 / 模型级覆盖 ----
+
+def test_parse_route_value():
+    assert vision_client._parse_route_value("vlm:qwen2.5vl") == ("vlm", "qwen2.5vl")
+    assert vision_client._parse_route_value("ocr") == ("ocr", "")
+    assert vision_client._parse_route_value("") == ("vlm", "")
+    assert vision_client._parse_route_value("vlm:qwen-vl-plus") == ("vlm", "qwen-vl-plus")
+
+
+def test_post_b64_model_local_overrides(monkeypatch):
+    import threading as _th
+    captured = {}
+
+    class FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": "text"}
+
+    def fake_post(url, json=None, timeout=None, trust_env=None):
+        captured.update(model=json["model"], images=json["images"])
+        return FakeResp()
+
+    monkeypatch.setattr(vision_client, "_use_cloud", lambda: False)
+    monkeypatch.setattr(vision_client, "_cache_on", lambda: False)
+    monkeypatch.setattr(vision_client, "_active_cloud", lambda: None)
+    monkeypatch.setattr(vision_client, "_OLLAMA_SEM", _th.BoundedSemaphore(1))
+    monkeypatch.setattr(vision_client, "httpx", type("H", (), {"post": staticmethod(fake_post)})())
+    import config_loader
+    monkeypatch.setattr(config_loader, "get",
+                        lambda: {"ollama": {"url": "http://localhost:11434/api/generate",
+                                            "model": "qwen2.5vl", "top_p": 0.8},
+                                 "models": {"llava": {"type": "ollama"}}})
+    vision_client._post_b64("B64", "prompt", 0.3, model="llava")
+    assert captured["model"] == "llava"  # 模型级覆盖本地 ollama 模型
+
+
+def test_post_b64_model_cloud_routes_to_provider(monkeypatch):
+    captured = {}
+
+    def fake_cloud(b64, prompt, temperature, provider=""):
+        captured["provider"] = provider
+        return "cloud_text"
+
+    monkeypatch.setattr(vision_client, "_post_cloud", fake_cloud)
+    monkeypatch.setattr(vision_client, "_cache_on", lambda: False)
+    import config_loader
+    monkeypatch.setattr(config_loader, "get",
+                        lambda: {"ollama": {}, "models": {"qwen-vl-plus": {"type": "cloud", "provider": "dashscope"}}})
+    out = vision_client._post_b64("B64", "prompt", 0.3, model="qwen-vl-plus")
+    assert out == "cloud_text"
+    assert captured["provider"] == "dashscope"  # cloud 模型 → 云端该厂商
+
+
+def test_run_engine_unregistered_logs_warning(monkeypatch, caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="vision_client"):
+        out = vision_client._run_engine("nope", "B64", "table", "", "desc")
+    assert out == ""
+    assert any("未注册" in r.message for r in caplog.records)

@@ -42,6 +42,35 @@ function readMcpStatus() {
   }
 }
 
+// 读模型注册表 + 路由表（v1.5 多路由模型）：config.json 的 models / router
+function readModels() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(DEPLOY_DIR(), 'config.json'), 'utf8'));
+    return { models: raw.models || {}, router: raw.router || {} };
+  } catch (e) {
+    return { models: {}, router: {} };
+  }
+}
+
+// 执行 toggle.py model 子命令（下载/删除/替换），detached 不弹窗
+function runModelCmd(args) {
+  return new Promise((resolve) => {
+    const toggle = path.join(DEPLOY_DIR(), 'toggle.py');
+    if (!fs.existsSync(toggle)) {
+      vscode.window.showErrorMessage('未找到 toggle.py（先运行 install.py 部署）');
+      return resolve();
+    }
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    const child = spawn(pythonCmd, [toggle, 'model', ...args], {
+      cwd: path.dirname(toggle), windowsHide: true, detached: true, stdio: 'ignore',
+    });
+    child.on('error', (err) => vscode.window.showErrorMessage('模型操作失败: ' + err.message));
+    child.on('exit', (code) => vscode.window.showInformationMessage(code === 0 ? '模型操作完成' : `模型操作结束，退出码 ${code}`));
+    child.unref();
+    setTimeout(resolve, 2000); // 等操作落地再刷新
+  });
+}
+
 async function api(baseUrl, method, p, body) {
   // 全程 try/catch：任何异常都不外抛（防未捕获 rejection 崩扩展宿主→循环重启弹窗）
   let ctrl = null;
@@ -128,6 +157,22 @@ class VisionTreeProvider {
       items.push(new VisionTreeItem(`${c.name}: ${c.model || '(未配model)'} key=${c.has_key ? '✓' : '✗'}`,
         'provider', c.name === d.active_provider ? '当前' : '点击切换', { kind: 'provider', provider: c.name }));
     });
+    // ── 模型管理（v1.5 多路由模型：本地 + 云端，按场景配模型）──
+    const { models, router } = readModels();
+    items.push(new VisionTreeItem('── 模型管理 ──', 'header', ''));
+    const modelNames = Object.keys(models);
+    if (modelNames.length === 0) {
+      items.push(new VisionTreeItem('模型: 无（config.models 空）', 'info', '用 toggle.py model add'));
+    }
+    for (const name of modelNames) {
+      const m = models[name];
+      items.push(new VisionTreeItem(`模型: ${name} (${m.type}${m.provider ? '/' + m.provider : ''})`,
+        'model', m.purpose || '点击操作', { kind: 'modelManage', model: name }));
+    }
+    items.push(new VisionTreeItem('场景映射（router）', 'header', ''));
+    for (const [scene, val] of Object.entries(router)) {
+      items.push(new VisionTreeItem(`  ${scene}: ${val}`, 'info', '改绑: toggle.py model replace'));
+    }
     items.push(new VisionTreeItem(`代理: ${d.proxy && d.proxy.status === 'ok' ? '运行中' : '?'} v${(d.proxy && d.proxy.version) || '?'} · pid ${(d.proxy && d.proxy.pid) || '?'}`, 'info', ''));
     items.push(new VisionTreeItem(`ollama: ${d.ollama_service && d.ollama_service.running ? '运行中 ' + (d.ollama_service.model || '') : '未运行'}`, 'info', ''));
     return items;
@@ -277,6 +322,27 @@ function activate(context) {
           case 'provider':
             if (action.provider) await post(baseUrl, '/api/backend', { kind: 'cloud', provider: action.provider });
             break;
+          case 'modelManage': {
+            const pick = await vscode.window.showQuickPick(
+              [{ label: '下载', value: 'download' }, { label: '逻辑删除', value: 'rm' },
+               { label: '物理删除 (ollama rm)', value: 'rmp' }, { label: '替换', value: 'replace' }],
+              { placeHolder: `操作模型 ${action.model}` });
+            if (!pick) break;
+            if (pick.value === 'replace') {
+              const newName = await vscode.window.showInputBox({ prompt: '新模型名（建议先 model add 注册）' });
+              if (newName && newName.trim()) await runModelCmd(['replace', action.model, newName.trim()]);
+            } else if (pick.value === 'rm') {
+              await runModelCmd(['rm', action.model]);
+            } else if (pick.value === 'rmp') {
+              const yes = await vscode.window.showQuickPick(
+                [{ label: '确认物理删除（不可逆，释放磁盘）', value: 'yes' }, { label: '取消', value: 'no' }],
+                { placeHolder: `物理删除 ${action.model} 将执行 ollama rm` });
+              if (yes && yes.value === 'yes') await runModelCmd(['rm', action.model, '--physical', '--yes']);
+            } else {
+              await runModelCmd(['download', action.model]);
+            }
+            break;
+          }
         }
       } catch (e) {
         vscode.window.showErrorMessage('操作失败: ' + ((e && e.message) || e));
