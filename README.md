@@ -212,8 +212,8 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 本地识别不是「简单描述」，而是**三次判定 + 场景分层 + 温度分层**。通过视觉档位（`/vision 1/2/3`）接入主流程——代理贴图和 MCP `describe_image` 都读取档位：
 
 ```
-第1次 scan：一句话描述 + 判断 大类+小类
-   ↓（注入）
+第1次 scan：一句话描述 + 判断 大类/小类/聚焦点
+   ↓（注入；混合图分叉为 主分支 + 聚焦点分支，各走各的引擎）
 第2次 zoom：按大类选清单提取事实（保守）
    ↓（注入 scan+zoom）
 第3次 guess：基于事实大胆推测（敢猜，列候选+置信度）
@@ -221,6 +221,8 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 档位决定调用次数：`1=fast`（scan 描述 + 场景标签）、`2=standard`（scan+zoom）、`3=deep`（scan+zoom+guess 完整三次 + **空间结构 grounding**）。
 
+> **混合场景分体路由**：scan 额外输出「聚焦点」= 画面最显著的次主体（如人+飞机图里的人）。standard/deep 档下主类与聚焦点**分叉成独立分支**，各按场景路由到对应引擎（如 vehicle→vlm、person→vlm 各提各的），互不干扰；普通单主体图自动单分支。8B 小模型对多主体判不定时会输出候选列表（`person|vehicle`），解析层自动降级为「候选第 1 项当主类、其余当聚焦点」的双分支兜底，**绝不掉 generic 丢信息**（仅整表抄回的回显除外）。
+>
 > **空间结构（deep 档专属）**：deep 档额外调用 grounding 能力，输出**结构化 JSON**（元素名 + 边界框 bbox 坐标）+ 原图尺寸。解决纯文本模型读散文描述时的「空间迷失」——CSS 布局、UI 对齐、图表坐标等场景，主模型基于结构化坐标推理拓扑关系，而非脑补。档位设置见「视觉档位开关」章节。
 >
 > **模型无关（可更换视觉模型）**：识别模型完全由 `config.json` 的 `ollama.model`（本地）或 `cloud.xxx.model`（云端）决定，换模型改配置即可。`scan/zoom/guess` 提示词通用；**`grounding`（空间结构）通过 `ollama.grounding` 开关控制**（默认 `true`）——换不支持边界框定位的模型时设 `false`，deep 档自动跳过 spatial（提示词已通用化，不再绑定 Qwen 格式）。
@@ -271,17 +273,18 @@ Claude Code ──(ANTHROPIC_BASE_URL=localhost:8787)──▶ 本代理 ──�
 
 **混合方案**：大类精调 + zoom 内「组合分支」兜底跨界（代码/表格/界面/地图/证件/表情包在任一 zoom 内都能被捕获）。
 
-### OCR 自动路由（纯文字场景）
+### OCR / 代码自动路由（纯文字场景）
 
-**场景**：`document.chat` / `document.code`（聊天记录、代码截图）这类**纯文字**图片，视觉模型"描述"不如"直接提取文字"准。
+**场景**：`document.chat`（聊天记录）这类**纯文字**图片走 **OCR**；`document.code`（代码截图）这类**保真优先**的走 **code 引擎**——视觉模型"描述"不如"直接提取文字"准，代码又比普通文字更吃保真（数字1↔小写l、数字0↔字母O、分号;↔冒号: 等），故两者分开特化。
 
 **路由逻辑**（在 `analyze` 的 zoom 层，`scan` 判场景后触发）：
-1. `scan` 判定场景 → 若是 `document.chat/code`
-2. 调 **RapidOCR**（本地 ONNX，离线免费，支持中英文）提取文字
-3. **严格限定纯文字**：OCR 提取到 **≥20 字符**才算纯文字 → 用 OCR 结果替代视觉 zoom（标 `[OCR]`）
-4. 提取不足（含图/空白）→ **回退视觉 zoom**（标 `[视觉]`）
 
-**收益**：纯文字截图的文字提取比视觉模型**更准**（OCR 精确到字符），且**少跑一次视觉 zoom**（省 10-30s）。视觉模型仍做 scan（描述/场景）+ guess（推测）。需 `pip install rapidocr_onnxruntime`（首次加载模型约 1-2s，之后复用单例）。
+1. `scan` 判定场景 → `document.chat` 走 **RapidOCR**（本地 ONNX，离线免费，支持中英文）
+2. **严格限定纯文字**：OCR 提取到 **≥20 字符**才算纯文字 → 用 OCR 结果替代视觉 zoom（标 `[OCR]`）
+3. 提取不足（含图/空白）→ **回退视觉 zoom**（标 `[视觉]`）
+4. `document.code` 走 **code 引擎**（VLM + extract_code 提示词，temperature 0.1 逐字符转写，标 `[视觉]`）
+
+**收益**：纯文字截图比视觉模型**更准**（OCR 精确到字符），且**少跑一次视觉 zoom**（省 10-30s）；代码逐字符保真，OCR 的通用空格/字符混淆不适用。需 `pip install rapidocr_onnxruntime`（首次加载模型约 1-2s，之后复用单例）。
 
 ### 视觉后端：默认本地，可选手动开云端
 
@@ -522,7 +525,7 @@ curl http://localhost:8787/api/status # 状态（ollama_service 走 HTTP 探测�
   python toggle.py model replace <旧> <新>           # 改 router 里所有引用
   ```
 - **面板**：VS Code 扩展「模型管理」区——模型列表（点击下载/逻辑删/物理删/替换）+ 场景映射（router 每场景当前引擎:模型）
-- **内置场景特化引擎**（基线路由已配，模型由你按需拉取配置）：`document.table → table`（表格→Markdown 提取）、`screenshot.software_ui → gui`（界面元素枚举）、`chart`（Table-First 先转表再取值）。接入专业引擎时**只换引擎函数体或改绑路由值**，面板不用动——如 `table` 换 rapid-table / PP-StructureV3、`gui` 换 OmniParser，用 `toggle.py model add/download <模型>` 拉取后改绑 `engine:model`
+- **内置场景特化引擎**（基线路由已配，模型由你按需拉取配置）：`document.table → table`（表格→Markdown 提取）、`document.code → code`（代码逐字符转写，保真 1↔l/0↔O/;↔:）、`screenshot.software_ui → gui`（界面元素枚举）、`chart`（Table-First 先转表再取值）。接入专业引擎时**只换引擎函数体或改绑路由值**，面板不用动——如 `table` 换 rapid-table / PP-StructureV3、`gui` 换 OmniParser，用 `toggle.py model add/download <模型>` 拉取后改绑 `engine:model`
 - **兜底 + 日志**：引擎未注册 / 模型未拉取 / 识别失败 → **回退全局模型**（不报错），回退事件记入 `vision-proxy.log`（proxy/MCP 进程都接）
 
 ## 命令行工具

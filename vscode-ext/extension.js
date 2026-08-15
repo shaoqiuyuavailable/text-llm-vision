@@ -40,7 +40,7 @@ const SCENE_SUB_LABELS = {
 };
 const ENGINE_LABELS = {
   ocr: 'OCR 文字提取', vlm: '视觉识别', table: '表格解析', gui: '界面元素定位',
-  rapidtable: '表格解析', omniparser: '界面元素定位',
+  code: '代码逐字提取', rapidtable: '表格解析', omniparser: '界面元素定位',
 };
 
 function sceneLabel(key) {

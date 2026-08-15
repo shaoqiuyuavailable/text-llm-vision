@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """统一视觉识别客户端：三次判定 + 混合方案（大类判定 + 组合分支兜底）。
 
-    scan(path)                 -> (描述, 大类, 小类, 内容类型列表)  第1次：描述+场景+混合内容判断
-    zoom(path, scene, sub, extra) -> 事实提取          第2次：按大类选清单，小类+内容类型注入上下文
+    scan(path)                 -> (描述, 大类, 小类, 聚焦点)  第1次：描述+场景+聚焦点
+    zoom(path, scene, sub)     -> 事实提取          第2次：按大类选清单，小类注入上下文
     guess(path, context, scene, sub, scan_desc) -> 推测   第3次：基于事实+场景
 
 提示词与采样参数从 config.json 读取（缺失回退 prompts.py）。
@@ -51,12 +51,6 @@ def _cache_on() -> bool:
 MAIN_SCENES = ("person", "animal", "plant", "food", "vehicle", "machine",
                "architecture", "document", "chart", "diagram", "map",
                "screenshot", "object", "meme", "scene", "unknown", "generic")
-
-# 混合画面内容类型（scan 第三行「内容:」）：固定小集合 → 特化提取映射。
-# 列表上限=集合大小(4)，实际 1-3；顺序=视觉占比从大到小（隐式主导度，不引权重数字）。
-_CONTENT_TYPES = ("table", "chart", "code", "ui")
-_CONTENT_LABELS = {"table": "表格", "chart": "图表", "code": "代码", "ui": "界面"}
-
 
 def _valid_mains() -> tuple:
     """有效大类单一事实源 = config scenes 的键（让 config 新增的类也能被分类）。"""
@@ -265,56 +259,163 @@ def _to_b64(path_or_b64: str) -> str:
     return _downscale_b64(path_or_b64)
 
 
-def _parse_scene(text: str) -> tuple[str, str, list[str]]:
-    """从 scan 输出解析 (大类, 小类, 内容类型列表)。容忍有标签(大类: X)与无标签(纯值)两种输出。"""
+def _parse_scene(text: str) -> tuple[str, str, list[tuple[str, str]]]:
+    """从 scan 输出解析 (大类, 小类, 聚焦点列表)。
+
+    大类为候选列表/回显（含「|」，模型在多个类间未定）时，用聚焦点[0]
+    （视觉占比最大，模型自己排的序）当主类；聚焦点缺失（混合图常见）→ 候选
+    第 1 项当主类、其余降级为聚焦点（保序双分支），绝不掉 generic。
+    >3 个候选 = 整表抄回（回显）→ 保持 generic 兜底。"""
     main, sub = "generic", ""
     all_subs = [s for d in _scenes().values() for s in d.get("sub", [])]
+    echo = False
 
-    # 优先找「大类: X」标签
-    m = re.search(r"大类\s*[=:：]\s*(\w+)", text)
+    # 大类：候选列表/回显（含「|」，模型并列多个类）→ echo=True（稍后聚焦点兜底）。
+    # 括号注解（person(real_single)）不是回显——提取括号里的合法小类。
+    m = re.search(r"大类\s*[=:：]\s*(.+)", text)
     if m:
-        cand = m.group(1).lower()
-        if cand in _valid_mains():
-            main = cand
-    # 无标签时：从文本里挑第一个出现在有效大类里的词
-    if main == "generic" and "generic" not in text:
+        val = m.group(1).strip()
+        if "|" in val:
+            echo = True
+        else:
+            cand = re.match(r"(\w+)", val)
+            if cand and cand.group(1).lower() in _valid_mains():
+                main = cand.group(1).lower()
+                m2 = re.search(r"\((\w+)\)", val)
+                if m2 and m2.group(1).lower() in all_subs:
+                    sub = m2.group(1).lower()
+    # 无标签兜底（回显时不走，避免任意捡词）
+    if not echo and main == "generic" and "generic" not in text:
         for tok in re.findall(r"[A-Za-z]+", text):
             if tok.lower() in _valid_mains():
                 main = tok.lower()
                 break
 
-    # 小类：优先找「小类: X」标签
-    ms = re.search(r"小类\s*[=:：]\s*(\w+)", text)
-    if ms and ms.group(1) != "无":
-        cand = ms.group(1).lower()
-        if cand in all_subs or cand in _valid_mains():
-            sub = cand
-    if not sub:
-        # 无标签：在 main 允许的小类里挑第一个出现的
+    # 小类（回显的候选列表不解析，避免捡到乱填值；原始值另存供候选配对）
+    sub_raw = ""
+    if not echo:
+        ms = re.search(r"小类\s*[=:：]\s*(\w+)", text)
+        if ms and ms.group(1) != "无":
+            cand = ms.group(1).lower()
+            if cand in all_subs or cand in _valid_mains():
+                sub = cand
+    ms = re.search(r"小类\s*[=:：]\s*(.+)", text)
+    if ms:
+        sub_raw = ms.group(1).strip()
+    if not sub and not echo:
         allowed = _scenes().get(main, {}).get("sub", [])
         for tok in re.findall(r"[A-Za-z]+", text):
             if tok.lower() in allowed:
                 sub = tok.lower()
                 break
-    # 兜底：大类没有小类时（animal/chart）强制清空，避免 8B 乱填
+    # 大类没有小类时强制清空
     if not _scenes().get(main, {}).get("sub"):
         sub = ""
-    # 第三行「画面类型:」：混合画面内容类型（table/chart/code/ui），逗号分隔、顺序=视觉主导度。
-    # 行级锚定防描述句误命中；缺失/「无」→ 空列表（老输出兼容）。
-    # 回显防线：8B 模型可能把指令整段当答案抄（如「画面类型: 无 或 table,chart,code,ui（逗号分隔…）」），
-    # 行超长即拒绝，防指令污染 extra。
-    extra = []
+
+    # 聚焦点：行级锚定防描述句误命中；缺失/「无」→ 空列表。
+    focus = []
     for line in text.splitlines():
-        m = re.search(r"(?:画面类型|内容)\s*[=:：]\s*(.+)", line)
+        m = re.search(r"聚焦点\s*[=:：]\s*(.+)", line)
         if m:
-            val = m.group(1).strip().rstrip("。.")
-            if len(val) <= 20:
-                for tok in re.split(r"[，,、\s]+", val):
-                    tok = tok.strip().lower()
-                    if tok in _CONTENT_TYPES and tok not in extra:
-                        extra.append(tok)
+            focus = _parse_scene_list(m.group(1))
+
+    # 大类候选列表（person|vehicle 未定）→ 用聚焦点[0]（视觉占比最大）当主类。
+    # 聚焦点缺失（模型全无头绪，混合图常见）→ 候选列表第 1 项当主类、其余降级为
+    # 聚焦点（位置配对小类），保证混合图仍走双分支——绝不掉成 generic（信息全丢）。
+    if echo:
+        if focus and focus[0][0] not in ("generic", "unknown"):
+            main, sub = focus[0]
+            focus = focus[1:]
+        else:
+            cands = _parse_candidates(val)
+            subs = [t.strip().lower() for t in sub_raw.split("|") if t.strip()] if "|" in sub_raw else []
+            # 候选 ≤3 才当真实的「骑墙」（混合图人+飞机）；>3 是模型把类别表整段抄回（回显），保持 generic
+            if 0 < len(cands) <= 3:
+                # 先按位置配对小类（基于未过滤顺序），再丢弃 unknown/generic 兜底项：
+                # unknown 是「无法判断」桶，混在真实候选里是回显残留，真实主体优先
+                paired = [(nm, subs[i] if i < len(subs) and subs[i] in _scenes().get(nm, {}).get("sub", []) else sm)
+                          for i, (nm, sm) in enumerate(cands)]
+                paired = [(nm, sm) for nm, sm in paired if nm not in ("unknown", "generic")]
+                if paired:
+                    main, sub = paired[0]
+                    focus = paired[1:]
+        if not _scenes().get(main, {}).get("sub"):
+            sub = ""
+    return main, sub, focus
+
+
+def _parse_scene_list(val: str) -> list[tuple[str, str]]:
+    """解析「大类名」/「大类.小类」/「小类名」逗号列表 → [(main, sub)]，保序去重。
+
+    小类名直接命中（如 airplane → vehicle.airplane）自动归到所属大类；
+    令牌法防回显：非法基名且非任何大类的小类 → 整行拒绝。"""
+    out = []
+    val = (val or "").strip().rstrip("。.")
+    if not val or val in ("无", "none"):
+        return out
+    for tok in re.split(r"[，,、\s]+", val):
+        tok = tok.strip().lower()
+        if not tok or tok in ("无", "none"):
+            continue
+        parts = tok.split(".")
+        m = parts[0].strip()
+        s = parts[1].strip() if len(parts) > 1 else ""
+        if m not in _valid_mains():
+            # 小类名 → 找所属大类（airplane → vehicle.airplane）
+            owner = next((om for om, d in _scenes().items() if m in d.get("sub", [])), None)
+            if owner:
+                m, s = owner, m
+            else:
+                return []  # 回显/乱填 → 整行拒绝
+        elif s and s not in _scenes().get(m, {}).get("sub", []):
+            s = ""  # 非法小类丢弃，保留大类
+        if (m, s) not in out:
+            out.append((m, s))
+    return out
+
+
+def _parse_candidates(val: str) -> list[tuple[str, str]]:
+    """解析大类候选列表（person(人物)|vehicle(交通工具)）→ [(大类, 小类)] 保序去重。
+
+    8B 对混合图（人+飞机）骑墙时可能并列多个类（「|」分隔），每项可带括号注解
+    （中文标签或合法小类名）。非法大类跳过；无法解析返回空列表。"""
+    out = []
+    for tok in (val or "").split("|"):
+        m = re.match(r"(\w+)\s*(?:\((\w+)\))?", tok.strip())
+        if not m:
+            continue
+        name, sub = m.group(1).lower(), (m.group(2) or "").lower()
+        if name not in _valid_mains():
+            continue
+        if sub and sub not in _scenes().get(name, {}).get("sub", []):
+            sub = ""  # 括号里不是合法小类（中文标签等）→ 丢弃
+        if (name, sub) not in out:
+            out.append((name, sub))
+    return out
+
+
+def _dedupe_guess(text: str) -> str:
+    """guess 输出去重：8B 在画面清晰/事实充分时可能沿「候选N:」模板重复输出几十个
+    同质候选（重复循环）。按「候选N:」切块、按名称去重、最多保留 3 个；
+    全同质时保留 1 个；无候选格式时原样返回。"""
+    if not text:
+        return text
+    blocks = re.split(r"(?=候选\s*\d+\s*:)", text)
+    if len(blocks) <= 2:
+        return text  # 无「候选N:」格式（或只有引导句）→ 原样
+    seen, kept = set(), []
+    for b in blocks[1:]:
+        m = re.search(r"名称\s*[:：]\s*(.+)", b)
+        name = m.group(1).strip() if m else b.strip()[:20]
+        if name in seen:
+            continue
+        seen.add(name)
+        kept.append(b)
+        if len(kept) >= 3:
             break
-    return main, sub, extra
+    if not kept:
+        return text
+    return blocks[0] + "".join(kept)
 
 
 def describe(path_or_b64: str, prompt: str = "") -> str:
@@ -411,25 +512,22 @@ def _parse_route_value(value: str) -> tuple[str, str]:
 
 
 def _prompt_call(path_or_b64: str, prompt_key: str, scene: str, sub: str, scan_desc: str,
-                 extra: list[str] | None = None, model: str = "") -> str:
+                 model: str = "") -> str:
     """引擎通用调用：取指定提示词条目，拼场景 header（与 zoom 同款结构），_post_b64 发送。
 
-    供 _engine_table/_engine_gui 等提示词类引擎复用——接入专业引擎（rapid-table/OmniParser）
-    时替换引擎函数体，本助手保留给其它提示词类引擎用。extra=混合画面内容类型，注入 header。"""
+    供 _engine_table/_engine_gui/_engine_code 等提示词类引擎复用——接入专业引擎
+    （rapid-table/OmniParser）时替换引擎函数体，本助手保留给其它提示词类引擎用。"""
     e = _entry(prompt_key)
     header = f"场景大类：{scene}"
     if sub:
         header += f"，小类：{sub}"
-    if extra:
-        header += "，画面内容：" + "、".join(_CONTENT_LABELS.get(t, t) for t in extra)
     if scan_desc.strip():
         header += f"\n第1次扫描的初步判断：\n{scan_desc.strip()}"
     prompt = f"{header}\n\n请基于以上信息，按以下要求处理：\n{e['text']}"
     return _post_b64(_to_b64(path_or_b64), prompt, e["temperature"], model=model)
 
 
-def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str,
-                extra: list[str] | None = None, model: str = "") -> str:
+def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
     """OCR 引擎（RapidOCR）：只提取文字。提取不足返回空串 → 调用方回退 vlm。"""
     text = ocr(path_or_b64)
     if len(text) >= 20:
@@ -437,28 +535,33 @@ def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str,
     return ""
 
 
-def _engine_vlm(path_or_b64: str, scene: str, sub: str, scan_desc: str,
-                extra: list[str] | None = None, model: str = "") -> str:
+def _engine_vlm(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
     """VLM 引擎：走 zoom 按类提示词。model 非空时用指定模型（本地 ollama / 云端厂商）。"""
-    return zoom(path_or_b64, scene, sub=sub, scan_desc=scan_desc, extra=extra, model=model)
+    return zoom(path_or_b64, scene, sub=sub, scan_desc=scan_desc, model=model)
 
 
-def _engine_table(path_or_b64: str, scene: str, sub: str, scan_desc: str,
-                  extra: list[str] | None = None, model: str = "") -> str:
+def _engine_table(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
     """表格引擎：完整提取表格 → Markdown。
 
     当前实现：VLM + 表格提取提示词（extract_table）。接入专业引擎（rapid-table /
     PP-StructureV3）时替换本函数体，_ENGINES 与路由不用动；模型由用户按需配置（engine:model）。"""
-    return _prompt_call(path_or_b64, "extract_table", scene, sub, scan_desc, extra=extra, model=model)
+    return _prompt_call(path_or_b64, "extract_table", scene, sub, scan_desc, model=model)
 
 
-def _engine_gui(path_or_b64: str, scene: str, sub: str, scan_desc: str,
-                extra: list[str] | None = None, model: str = "") -> str:
+def _engine_gui(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
     """GUI 引擎：枚举界面可交互元素（VLM + extract_gui 提示词）。
 
     接入专业引擎（OmniParser / UI-TARS）时替换本函数体，_ENGINES 与路由不用动；
     模型由用户按需配置（engine:model）。"""
-    return _prompt_call(path_or_b64, "extract_gui", scene, sub, scan_desc, extra=extra, model=model)
+    return _prompt_call(path_or_b64, "extract_gui", scene, sub, scan_desc, model=model)
+
+
+def _engine_code(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+    """代码引擎：逐字符转写代码原文（VLM + extract_code 提示词，温度 0.1）。
+
+    通用 OCR 对代码保真差（数字1↔字母l、空格丢失、`);`被误读），代码必须逐字；
+    VLM 懂代码语义、按提示词严格保真，好于通用 OCR。模型由用户按需配置。"""
+    return _prompt_call(path_or_b64, "extract_code", scene, sub, scan_desc, model=model)
 
 
 # 引擎注册表：后续换专业引擎 = 加函数进注册表 + 改路由表指向，analyze 不动
@@ -467,6 +570,7 @@ _ENGINES = {
     "vlm": _engine_vlm,
     "table": _engine_table,  # 表格引擎（接 rapid-table 时换函数体）
     "gui": _engine_gui,      # 界面元素引擎（接 OmniParser 时换函数体）
+    "code": _engine_code,    # 代码逐字转写引擎（VLM 提示词）
 }
 
 # guess（第3次推测）只对实体/对象类场景有意义（身份/型号/品牌）。
@@ -475,17 +579,38 @@ _ENGINES = {
 _GUESS_SCENES = ("person", "animal", "plant", "food", "vehicle", "machine",
                  "architecture", "object", "meme", "scene")
 
+# 聚焦点（显著次主体）只对"照片/实体类"场景有意义——内容类场景（文档/截图/图表/图示/地图）
+# 没有可分离的照片次主体，模型可能误报 object（同 _GUESS_SCENES 集合）。
+_PHOTO_SCENES = _GUESS_SCENES
+
+# 分析分支上限：主类 + 最多 1 个聚焦点场景（2 分支）。每分支=一次引擎（+一次 guess），
+# 成本随分支线性涨；混合图（人+飞机）正好 2 分支，普通图自动 1 分支。要更多可调大。
+_MAX_BRANCHES = 2
+
+
+def _build_branches(main: str, sub: str, focus: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
+    """分析分支队列：主类必含，聚焦点中与主类不同的场景按序追加；去重 + _MAX_BRANCHES 封顶。"""
+    seen = {main}
+    out = [("主", main, sub)]
+    for m, s in focus:
+        if m in seen or m in ("generic", "unknown"):
+            continue
+        seen.add(m)
+        out.append(("聚焦点", m, s))
+        if len(out) >= _MAX_BRANCHES:
+            break
+    return out
+
 
 def _run_engine(engine: str, path_or_b64: str, scene: str, sub: str, scan_desc: str,
-                extra: list[str] | None = None, model: str = "") -> str:
-    """调引擎：未注册 / 异常返回空串（调用方回退 vlm，不报错）。回退记 warning 日志（兜底 + 可诊断）。
-    extra=混合画面内容类型，透传给引擎提示词（自适应提取，不换引擎）。"""
+                model: str = "") -> str:
+    """调引擎：未注册 / 异常返回空串（调用方回退 vlm，不报错）。回退记 warning 日志（兜底 + 可诊断）。"""
     fn = _ENGINES.get(engine)
     if fn is None:
         log.warning("router: 引擎 %r 未注册（scene=%s.%s），回退 vlm", engine, scene, sub)
         return ""
     try:
-        return fn(path_or_b64, scene, sub, scan_desc, extra=extra, model=model)
+        return fn(path_or_b64, scene, sub, scan_desc, model=model)
     except Exception as e:
         log.warning("router: 引擎 %s 异常 %s: %s（scene=%s.%s model=%s），回退 vlm",
                     engine, type(e).__name__, e, scene, sub, model or "-")
@@ -495,8 +620,8 @@ def _run_engine(engine: str, path_or_b64: str, scene: str, sub: str, scan_desc: 
 def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
     """按精度档位识别。统一入口，供 proxy / MCP 使用。
     - fast:     1 次 describe（单句描述）——快
-    - standard: 2 次 scan + zoom（描述 + 按场景提取事实）
-    - deep:     scan + zoom + guess（实体类场景含身份推测；文本/数据/界面类跳过推测防幻觉）
+    - standard: scan + 主类引擎 + 聚焦点引擎（混合图各分支独立提取）
+    - deep:     standard + 实体分支各自 guess（不合并）+ 空间结构
     precision 缺省时读 config.prompts.default（或 config ollama.precision）。
     mode 走 config modes 表动态覆盖 guess 温度（v2 --mode）。
     """
@@ -509,38 +634,56 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
         parsed = scan(path_or_b64)
         desc, scene = parsed[0], parsed[1]
         return f"【初步判断】{desc}\n【场景】{scene}"
-    # standard / deep：先 scan 判场景 + 内容类型，再按路由表选引擎（视觉路由器 v1.5）
+    # standard / deep：先 scan 判场景 + 聚焦点，再按路由表选引擎（视觉路由器 v1.5）
     parsed = scan(path_or_b64)
     desc, scene, sub = parsed[0], parsed[1], parsed[2]
-    extra = parsed[3] if len(parsed) > 3 else []  # 混合画面内容类型（旧调用方 3 元组兼容）
-    # 路由：scene(.sub) → "引擎" | "引擎:模型"（用户自行配置，场景与模型解耦）。
-    # 引擎未注册 / 异常 / 输出不足 / 模型缺失 → 回退全局 vlm（兜底 + log.warning）。
-    # 混合内容：extra 注入引擎 header，主引擎按内容类型自适应提取（不换引擎、不二次调用）。
-    engine, model = _parse_route_value(_route_engine(scene, sub))
-    facts = _run_engine(engine, path_or_b64, scene, sub, desc, extra=extra, model=model)
-    ocr_used = bool(facts and engine == "ocr")
-    if not facts:
-        model = ""  # 指定模型失败/缺失 → guess/spatial 也用全局模型
-        facts = _run_engine("vlm", path_or_b64, scene, sub, desc, extra=extra) or "[识别失败（引擎异常），已回退]"
+    focus = parsed[3] if len(parsed) > 3 else []   # 聚焦点（显著次主体）
+    if scene not in _PHOTO_SCENES:
+        focus = []  # 内容类场景（diagram 等）的聚焦点误报（object）→ 丢弃，不跑多余分支
+    # 分析分支：主类 + 聚焦点中与主类不同的场景（去重 + _MAX_BRANCHES 封顶）。
+    # 混合图（如人+飞机）→ 两个分支各自路由引擎、各提各的，互不干扰；普通图自动 1 分支。
+    branches = _build_branches(scene, sub, focus)
+    branch_out = []
+    ocr_used = False
+    for label, m, s in branches:
+        eng, mdl = _parse_route_value(_route_engine(m, s))
+        facts = _run_engine(eng, path_or_b64, m, s, desc, model=mdl)
+        if facts and eng == "ocr":
+            ocr_used = True
+        if not facts:
+            mdl = ""  # 指定模型失败/缺失 → 兜底用全局模型
+            facts = _run_engine("vlm", path_or_b64, m, s, desc) or ""
+        if not facts and label == "主":
+            facts = "[识别失败（引擎异常），已回退]"  # 主分支失败必须有占位；聚焦点分支空则丢弃
+        if facts:
+            branch_out.append((label, m, s, facts, mdl))
+    if not branch_out:
+        branch_out.append(("主", scene, sub, "[识别失败（引擎异常），已回退]", ""))
+    # 细节分节：主类无头，聚焦点加节标题（【聚焦点】场景名）
+    parts = [facts if label == "主" else f"【{label}】{m}\n{facts}" for label, m, _s, facts, _mdl in branch_out]
+    facts_block = "\n\n".join(parts)
     if precision == "standard":
         tag = "[OCR]" if ocr_used else "[视觉]"
-        return f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}"
-    # deep：实体类场景再加 guess（身份/型号/品牌推测）；文本/数据/界面类跳过——
-    # 这类场景内容已在 OCR/事实里，guess 会基于文字幻觉（如把对话框文字当身份证据）。
-    guess_out = ""
-    if scene in _GUESS_SCENES:
-        guess_out = guess(path_or_b64, context=facts, scene=scene, sub=sub, scan_desc=desc, mode=mode, model=model)
+        return f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts_block}"
+    # deep：实体分支各自 guess（不合并，各自用本分支事实+场景）；空间结构整图一次
+    guess_parts = []
+    for label, m, s, facts, mdl in branch_out:
+        if m in _GUESS_SCENES and facts.strip():
+            g = guess(path_or_b64, context=facts, scene=m, sub=s, scan_desc=desc, mode=mode, model=mdl)
+            if g:
+                head = "【推测】" if label == "主" else f"【推测·{label}】"
+                guess_parts.append(f"{head}\n{g}")
     # 模型无关：config ollama.grounding 控制是否启用 grounding（换不支持 bbox 的模型时设 false 跳过）
     spatial_out = ""
     if config_loader.get().get("ollama", {}).get("grounding", True):
         try:
-            spatial_out = spatial(path_or_b64, model=model)
+            spatial_out = spatial(path_or_b64, model=branch_out[0][4])
         except Exception:
             spatial_out = ""  # grounding 失败不影响主体
     tag = "[OCR]" if ocr_used else "[视觉]"
-    base = f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}"
-    if guess_out:
-        base += f"\n\n【推测】\n{guess_out}"
+    base = f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts_block}"
+    if guess_parts:
+        base += "\n\n" + "\n\n".join(guess_parts)
     if scene == "unknown":
         base += "\n【结论】模型判定无法归类，以下信息可能不完整，引用时请降级置信度。"
     if spatial_out:
@@ -548,24 +691,23 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
     return base
 
 
-def scan(path_or_b64: str) -> tuple[str, str, str, list[str]]:
-    """第1次：一句话描述 + 判断大类+小类 + 内容类型列表。返回 (描述, 大类, 小类, extra)。"""
+def scan(path_or_b64: str) -> tuple[str, str, str, list[tuple[str, str]]]:
+    """第1次：一句话描述 + 判断大类/小类 + 聚焦点。返回 (描述, 大类, 小类, 聚焦点)。"""
     e = _entry("scan")
     text = _post_b64(_to_b64(path_or_b64), e["text"], e["temperature"])
-    main, sub, extra = _parse_scene(text)
+    main, sub, focus = _parse_scene(text)
     if not sub:
         # 接线 default_sub：scan 未给出小类时用该大类的默认小类（document 默认 report 不触发 OCR 路由）
         sub = _scenes().get(main, {}).get("default_sub", "") or ""
-    return text, main, sub, extra
+    return text, main, sub, focus
 
 
 def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str = "",
-         extra: list[str] | None = None, model: str = "") -> str:
+         model: str = "") -> str:
     """第2次：按大类选 zoom 清单，小类作为上下文注入。
 
     scene 能否 zoom 取决于有没有 zoom_<scene> 提示词；缺失（如 config 新增类漏配）回退 generic，
-    避免发「只有 header、正文空」的请求。extra=混合画面内容类型（表格/图表/代码/界面），注入 header，
-    让引擎对混合内容自适应提取（主引擎不换、不二次调用）。model 非空时用指定模型（v1.5 场景模型）。"""
+    避免发「只有 header、正文空」的请求。model 非空时用指定模型（v1.5 场景模型）。"""
     if f"zoom_{scene}" not in config_loader.get()["prompts"]:
         scene = "generic"
     e = _entry(f"zoom_{scene}")
@@ -573,8 +715,6 @@ def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str
     header = f"场景大类：{scene}"
     if sub:
         header += f"，小类：{sub}"
-    if extra:
-        header += "，画面内容：" + "、".join(_CONTENT_LABELS.get(t, t) for t in extra)
     if scan_desc.strip():
         header += f"\n第1次扫描的初步判断：\n{scan_desc.strip()}"
     prompt = f"{header}\n\n请基于以上信息，按以下清单逐项提取更精确的事实：\n{e['text']}"
@@ -600,4 +740,4 @@ def guess(path_or_b64: str, context: str = "", scene: str = "", sub: str = "",
         prompt += f"\n\n第1次扫描的初步判断：\n{scan_desc.strip()}"
     if context.strip():
         prompt += f"\n\n已提取的事实特征：\n{context.strip()}"
-    return _post_b64(_to_b64(path_or_b64), prompt, temp, model=model)
+    return _dedupe_guess(_post_b64(_to_b64(path_or_b64), prompt, temp, model=model))

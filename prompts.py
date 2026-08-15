@@ -37,7 +37,7 @@ MODES = {"rigorous": 0.3, "identity": 0.5, "military": 0.6, "anime": 0.7, "open"
 # 系统不预设场景-模型绑定，全部由用户配置。
 ROUTER = {
     "document.chat": "ocr",                 # 纯文字 → RapidOCR（保留现有行为）
-    "document.code": "ocr",
+    "document.code": "code",                # 代码截图 → code 引擎（VLM 逐字符转写；通用 OCR 对代码保真差 1↔l/空格丢失）
     "document.table": "table",              # 表格 → 表格引擎（模型由用户按需配置，可改绑 engine:model）
     "chart": "vlm",                          # 图表 → 增强提示词（Table-First 先转表再取值），面板可见可改绑
     "screenshot.software_ui": "gui",         # 软件界面 → GUI 引擎（模型由用户按需配置，可改绑 engine:model）
@@ -92,7 +92,8 @@ _ANTI_HALLUC = ("只写图中能看到的事实，禁止编造；看不清的文
 
 _PROMPTS = {
     "scan": {
-        "text": "用一句简短中文描述图片主要内容。然后判断类别，严格输出三行：\n"
+        "text": "用一句简短中文描述图片主要内容。然后判断类别：大类取画面中占用面积最大的主体"
+                "（天空/地面/纯背景不算），严格输出三行：\n"
                 "大类: person(人物/角色，含真人/动漫/游戏/Cosplay/雕像/画作)|animal(动物)|plant(植物)|"
                 "food(食物)|vehicle(交通工具)|machine(机械设备)|architecture(建筑)|document(以文字为主的内容)|"
                 "chart(数据图)|diagram(结构示意图/流程图)|map(地图)|screenshot(软件/网页/终端界面截图，"
@@ -104,7 +105,7 @@ _PROMPTS = {
                 "diagram=flowchart|org_chart|network|sequence|gantt|venn|unknown；screenshot=software_ui|website|chat|"
                 "terminal|error|settings|unknown；vehicle=car|motorcycle|truck|bus|train|airplane|ship|bicycle|unknown；"
                 "machine=industrial|household|electronics|tool|construction|unknown；其它大类小类填 无。\n"
-                "画面类型: 无 或 table,chart,code,ui（逗号分隔，最多列3个，按视觉占比排序；界面截图写 ui）。\n"
+                "聚焦点: 无 或 大类名,大类名（最多2个，画面最显著的前景/次要元素，与主类不同时填）。\n"
                 "判定要点：带窗口标题栏/菜单栏/工具栏/状态栏的软件界面截图，即使内含数据表格或图表，"
                 "一律归screenshot；代码不是图表(属document.code)；纯表格/数据网格且无窗口元素的截图归document.table；"
                 "纯表情包/梗图归meme；地图归map而非chart；数据图归chart，结构关系图归diagram。\n"
@@ -231,6 +232,14 @@ _PROMPTS = {
                 "4) 静态文本/标签也列出 5) 若界面含数据表格或图表，按行提取其内容(表头/行/列/数值) "
                 "6) 文字清晰照抄，模糊标 [无法识别]。\n按列表输出。",
         "temperature": 0.3,
+    },
+    "extract_code": {
+        "text": f"{_ANTI_HALLUC}\n这是代码截图，逐字符转写代码原文（代码必须逐字保真）：\n"
+                "1) 保留所有空格/缩进/换行，标点 (){{}};:,=. -> 等原样输出 "
+                "2) 严格区分数字1与小写l、数字0与字母O、分号;与冒号: "
+                "3) 不要增删改任何字符，不要补全或「修复」代码 "
+                "4) 看不清的字符标 [无法识别]，禁止猜测 5) 只输出代码本身，不要解释。",
+        "temperature": 0.1,
     },
     "spatial": {
         "text": "定位图中主要视觉元素。若模型支持边界框定位：输出 JSON 数组 "

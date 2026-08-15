@@ -19,9 +19,9 @@ def main():
     try:
         parsed = vision_client.scan(path)
         desc, main, sub = parsed[0], parsed[1], parsed[2]
-        extra = parsed[3] if len(parsed) > 3 else []
-        print(json.dumps({"path": path, "main": main, "sub": sub, "extra": extra, "desc": desc},
-                         ensure_ascii=False))
+        focus = parsed[3] if len(parsed) > 3 else []
+        print(json.dumps({"path": path, "main": main, "sub": sub, "focus": focus,
+                          "desc": desc}, ensure_ascii=False))
         return 0
     except Exception as e:
         print(json.dumps({"path": path, "error": str(e)}, ensure_ascii=False))

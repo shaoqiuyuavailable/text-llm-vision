@@ -114,27 +114,114 @@ def _mixed_scenes():
     }
 
 
-def test_parse_scene_extra_content_types(monkeypatch):
-    # 混合画面：scan 第三行「画面类型:」→ 类型列表（保序、过滤未知、容错分隔符、去重）
+
+def test_parse_scene_focus_points(monkeypatch):
+    # 聚焦点：主类之外的大类名（可带小类），保序；令牌法防回显
     monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
     monkeypatch.setattr(vision_client, "_scenes", _mixed_scenes)
-    assert vision_client._parse_scene("大类: document\n小类: report\n画面类型: chart, table") == \
-        ("document", "report", ["chart", "table"])
-    assert vision_client._parse_scene("大类: screenshot\n小类: software_ui\n画面类型: table") == \
-        ("screenshot", "software_ui", ["table"])
-    # 单内容图写 无 → 空列表
-    assert vision_client._parse_scene("大类: vehicle\n小类: car\n画面类型: 无") == ("vehicle", "car", [])
-    # 未知类型过滤 + 中文顿号容错 + 去重
-    assert vision_client._parse_scene("大类: document\n小类: report\n画面类型: chart、图标、table") == \
-        ("document", "report", ["chart", "table"])
-    # 老「内容:」标签兼容
-    assert vision_client._parse_scene("大类: document\n小类: report\n内容: chart, table") == \
-        ("document", "report", ["chart", "table"])
-    # 回显防线：指令整段被抄（行超长）→ 拒绝，防污染
-    assert vision_client._parse_scene("大类: document\n小类: report\n画面类型: 无 或 table,chart,code,ui（逗号分隔，最多列3个，按视觉占比从大到小排序）。") == \
-        ("document", "report", [])
-    # 老两行输出（无画面类型行）兼容
-    assert vision_client._parse_scene("大类: vehicle\n小类: car") == ("vehicle", "car", [])
+    assert vision_client._parse_scene("大类: vehicle\n小类: car\n聚焦点: person.real_single") == \
+        ("vehicle", "car", [("person", "real_single")])
+    assert vision_client._parse_scene("大类: vehicle\n小类: car\n聚焦点: person, person") == \
+        ("vehicle", "car", [("person", "")])  # 去重
+    # 单主体图写 无 → 空列表
+    assert vision_client._parse_scene("大类: vehicle\n小类: car\n聚焦点: 无") == ("vehicle", "car", [])
+    # 回显防线：指令整段被抄 → 令牌含非法基名 → 整行拒绝
+    assert vision_client._parse_scene("大类: vehicle\n小类: car\n聚焦点: 无 或 大类名,大类名（最多2个）") == \
+        ("vehicle", "car", [])
+
+
+def test_parse_scene_echo_category_list_goes_generic(monkeypatch):
+    # 回显防线（大类）：模型把类别表整段抄回（含 | / (）→ 判 generic，不任意捡第一个词
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _mixed_scenes)
+    echoed = ("大类: person(人物/角色)|animal(动物)|vehicle(交通工具)|unknown(无法确定)\n"
+              "小类: real_single|car\n画面类型: 无\n聚焦点: 无")
+    assert vision_client._parse_scene(echoed) == ("generic", "", [])
+
+
+def _real_scenes():
+    return {
+        "person": {"sub": ["real_single", "real_group"], "default_sub": "real_single"},
+        "vehicle": {"sub": ["car", "airplane"], "default_sub": "car"},
+        "unknown": {"sub": [], "default_sub": ""},
+        "generic": {"sub": [], "default_sub": ""},
+    }
+
+
+def test_parse_scene_real_mixed_output(monkeypatch):
+    # 真实模型输出（人+飞机）：大类候选列表 person|vehicle + 聚焦点小类名 airplane
+    # → 主类用聚焦点[0]（视觉占比最大）= vehicle.airplane，聚焦点剩下 person
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _real_scenes)
+    out = vision_client._parse_scene(
+        "大类: person(人物)|vehicle(交通工具)\n"
+        "小类: real_single|airplane\n"
+        "聚焦点: airplane, person")
+    assert out == ("vehicle", "airplane", [("person", "")])
+
+
+def test_parse_candidates(monkeypatch):
+    # 大类候选列表解析：| 分隔、括号注解（中文标签丢弃、合法小类保留）、保序去重
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _real_scenes)
+    assert vision_client._parse_candidates("person(人物)|vehicle(交通工具)") == [("person", ""), ("vehicle", "")]
+    assert vision_client._parse_candidates("person(real_single)|vehicle(car)") == [("person", "real_single"), ("vehicle", "car")]
+    assert vision_client._parse_candidates("unknown(无法确定)") == [("unknown", "")]
+    assert vision_client._parse_candidates("") == []
+    # 非法大类跳过；重复去重
+    assert vision_client._parse_candidates("foo|vehicle|vehicle") == [("vehicle", "")]
+
+
+def test_parse_scene_candidate_list_no_focus_builds_branches(monkeypatch):
+    # 候选列表 + 聚焦点:无（模型全无头绪，混合图常见）→ 不再掉 generic：
+    # 候选第 1 项当主类，其余降级为聚焦点（位置配对小类），保证双分支
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _real_scenes)
+    out = vision_client._parse_scene(
+        "大类: person(人物)|vehicle(交通工具)\n"
+        "小类: real_single|airplane\n"
+        "聚焦点: 无")
+    assert out == ("person", "real_single", [("vehicle", "airplane")])
+
+
+def test_parse_scene_candidate_list_filters_unknown(monkeypatch):
+    # 回显残留：unknown 混进候选列表（person|unknown）→ 丢弃 unknown，真实主体优先
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _real_scenes)
+    out = vision_client._parse_scene(
+        "大类: person(人物)|unknown\n"
+        "小类: real_single|unknown\n"
+        "聚焦点: 无")
+    assert out == ("person", "real_single", [])
+
+
+def test_parse_scene_candidate_list_full_echo_stays_generic(monkeypatch):
+    # >3 个候选 = 模型把类别表整段抄回（回显），不是真实骑墙 → 保持 generic 兜底
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _mixed_scenes)
+    echoed = ("大类: person(人物/角色)|animal(动物)|vehicle(交通工具)|unknown(无法确定)\n"
+              "小类: real_single|car\n画面类型: 无\n聚焦点: 无")
+    assert vision_client._parse_scene(echoed) == ("generic", "", [])
+
+
+def test_parse_scene_paren_annotation_not_echo(monkeypatch):
+    # 回归：person(real_single) 是括号注解（模型给大类补小类说明），不是候选列表/回显
+    # 不能因含「(」而降级 generic（曾引入此回归）
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _real_scenes)
+    out = vision_client._parse_scene(
+        "大类: person(real_single)\n小类: real_single\n画面类型: object\n聚焦点: 无")
+    assert out == ("person", "real_single", [])  # 画面类型 object 非法类型被过滤
+
+
+def test_parse_scene_list_sub_name_to_main(monkeypatch):
+    # 聚焦点里的小类名（airplane）自动归到所属大类 vehicle
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _real_scenes)
+    assert vision_client._parse_scene_list("airplane, person") == [("vehicle", "airplane"), ("person", "")]
+    assert vision_client._parse_scene_list("无") == []
+    # 非法基名（不是大类也不是小类）→ 整行拒绝
+    assert vision_client._parse_scene_list("大类名") == []
 
 
 def test_scan_applies_default_sub(monkeypatch):
@@ -142,10 +229,10 @@ def test_scan_applies_default_sub(monkeypatch):
     monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
     monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
     monkeypatch.setattr(vision_client, "_scenes", _v2_scenes)
-    _, scene, sub, extra = vision_client.scan("/tmp/x.png")
+    _, scene, sub, focus = vision_client.scan("/tmp/x.png")
     assert scene == "vehicle"
     assert sub == "car"  # default_sub 接线
-    assert extra == []  # 无内容行 → 空列表
+    assert focus == []  # 无聚焦点 → 空列表
 
 
 def test_zoom_uses_new_scene_prompt(monkeypatch):
@@ -174,45 +261,122 @@ def test_zoom_missing_prompt_falls_back_generic(monkeypatch):
     assert "generic" in captured["prompt"]  # 缺 key → 回退 zoom_generic
 
 
-def test_zoom_injects_extra_content_header(monkeypatch):
-    # 混合画面：extra 类型 → header「画面内容：」中文标签（引擎自适应提取的输入）
-    captured = {}
-
-    def fake_post(b64, prompt, temperature, model=""):
-        captured["prompt"] = prompt
-        return "OK"
-
-    import config_loader
-    monkeypatch.setattr(config_loader, "get", lambda: {
-        "prompts": {"zoom_document": {"text": "逐项提取", "temperature": 0.2},
-                    "zoom_generic": {"text": "通用", "temperature": 0.2}},
-        "ollama": {"temperature": 0.5},
-    })
-    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
-    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
-    vision_client.zoom("/tmp/x.png", scene="document", sub="report", extra=["chart", "table"])
-    assert "画面内容：图表、表格" in captured["prompt"]
-    assert "document" in captured["prompt"]
 
 
-def test_analyze_passes_extra_to_engine(monkeypatch):
-    # analyze：scan 第4元 extra 透传到引擎（主引擎不换、按内容类型自适应）
-    captured = {}
-
-    import config_loader
-    monkeypatch.setattr(vision_client, "scan",
-                        lambda p: ("描述", "document", "report", ["chart", "table"]))
-    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: captured.update(k) or "文档事实")
-    monkeypatch.setattr(vision_client, "guess", lambda *a, **k: "不应推测")
-    monkeypatch.setattr(vision_client, "spatial", lambda *a, **k: "")
-    monkeypatch.setattr(config_loader, "get", lambda: {
-        "router": {"document.report": "vlm"},
-        "prompts": {"zoom_document": {"text": "逐项提取", "temperature": 0.2}},
+def _branch_cfg(scenes):
+    return {
+        "router": {"_default": "vlm"},
+        "prompts": {f"zoom_{s}": {"text": s, "temperature": 0.3} for s in scenes}
+                   | {"guess": {"text": "推测", "temperature": 0.5}},
         "ollama": {"model": "qwen2.5vl", "temperature": 0.5},
-    })
+    }
+
+
+def test_analyze_mixed_branches_subject_and_focus(monkeypatch):
+    # 混合图（人+飞机）：主类 vehicle + 聚焦点 person → 两个分支各自引擎 + 各自 guess，输出分节
+    calls = []
+    monkeypatch.setattr(vision_client, "scan",
+                        lambda p: ("描述", "vehicle", "car", [("person", "")]))
+    monkeypatch.setattr(vision_client, "zoom",
+                        lambda *a, **k: calls.append(("zoom", a[1])) or f"{a[1]}事实")  # scene 是位置参数
+    monkeypatch.setattr(vision_client, "guess",
+                        lambda *a, **k: calls.append(("guess", k.get("scene"))) or "推测")
+    monkeypatch.setattr(vision_client, "spatial", lambda *a, **k: "")
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _branch_cfg(("vehicle", "person")))
     out = vision_client.analyze("/tmp/x.png", "deep")
-    assert captured["extra"] == ["chart", "table"]
-    assert "文档事实" in out
+    assert ("zoom", "vehicle") in calls
+    assert ("zoom", "person") in calls       # 聚焦点分支也跑了引擎
+    assert ("guess", "vehicle") in calls
+    assert ("guess", "person") in calls      # 实体分支各自 guess（不合并）
+    assert "【聚焦点】person" in out         # 输出分节
+
+
+def test_analyze_focus_same_as_main_dedup(monkeypatch):
+    # 聚焦点与主类同大类 → 只跑一次引擎，不分节
+    calls = []
+    monkeypatch.setattr(vision_client, "scan",
+                        lambda p: ("描述", "person", "real_single", [("person", "")]))
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: calls.append(a[1]) or "事实")  # scene 位置参数
+    monkeypatch.setattr(vision_client, "guess", lambda *a, **k: "推测")
+    monkeypatch.setattr(vision_client, "spatial", lambda *a, **k: "")
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _branch_cfg(("person",)))
+    out = vision_client.analyze("/tmp/x.png", "deep")
+    assert calls.count("person") == 1
+    assert "【聚焦点】" not in out
+
+
+def test_analyze_max_branches_cap(monkeypatch):
+    # 聚焦点 2 个不同场景 → 分支封顶（主 + 第1个聚焦点）
+    scenes = []
+    monkeypatch.setattr(vision_client, "scan",
+                        lambda p: ("描述", "person", "real_single", [("vehicle", ""), ("architecture", "")]))
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: scenes.append(a[1]) or "事实")  # scene 位置参数
+    monkeypatch.setattr(vision_client, "guess", lambda *a, **k: "推测")
+    monkeypatch.setattr(vision_client, "spatial", lambda *a, **k: "")
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _branch_cfg(("person", "vehicle", "architecture")))
+    vision_client.analyze("/tmp/x.png", "deep")
+    assert scenes == ["person", "vehicle"]  # 第2个聚焦点被 _MAX_BRANCHES 截断
+
+
+
+
+def test_analyze_content_scene_drops_focus(monkeypatch):
+    # 内容类场景（diagram）聚焦点误报 object → 丢弃，不跑多余分支
+    scenes = []
+    monkeypatch.setattr(vision_client, "scan",
+                        lambda p: ("描述", "diagram", "flowchart", [("object", "")]))
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: scenes.append(a[1]) or "图")
+    monkeypatch.setattr(vision_client, "guess", lambda *a, **k: "推测")
+    monkeypatch.setattr(vision_client, "spatial", lambda *a, **k: "")
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _branch_cfg(("diagram",)))
+    out = vision_client.analyze("/tmp/x.png", "deep")
+    assert scenes == ["diagram"]  # 聚焦点 object 被丢弃
+    assert "【聚焦点】" not in out
+
+
+def test_analyze_photo_scene_keeps_focus(monkeypatch):
+    # 照片类场景（person）聚焦点 food → 保留，跑第二分支
+    scenes = []
+    monkeypatch.setattr(vision_client, "scan",
+                        lambda p: ("描述", "person", "real_single", [("food", "")]))
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: scenes.append(a[1]) or "事实")
+    monkeypatch.setattr(vision_client, "guess", lambda *a, **k: "推测")
+    monkeypatch.setattr(vision_client, "spatial", lambda *a, **k: "")
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _branch_cfg(("person", "food")))
+    vision_client.analyze("/tmp/x.png", "deep")
+    assert scenes == ["person", "food"]  # 聚焦点 food 保留，第二分支跑
+
+
+def test_dedupe_guess_repeated_candidates():
+    # 8B 重复循环：20+ 个同质候选 → 按名称去重保留 1 个
+    repeated = ("推测候选：\n"
+                "候选1:\n名称: 射箭爱好者\n依据: 室内射箭\n反证: 无\n置信度(中)\n"
+                "候选2:\n名称: 射箭爱好者\n依据: 室内射箭\n反证: 无\n置信度(中)\n"
+                "候选3:\n名称: 射箭爱好者\n依据: 室内射箭\n反证: 无\n置信度(中)")
+    out = vision_client._dedupe_guess(repeated)
+    assert out.count("名称") == 1  # 全同质 → 保留 1 个候选
+
+
+def test_dedupe_guess_distinct_kept_cap3():
+    # 不同候选保留，最多 3 个；重复的第 4 个被删
+    text = ("推测：\n"
+            "候选1:\n名称: 射箭爱好者\n依据: a\n反证: b\n置信度(中)\n"
+            "候选2:\n名称: 射箭教练\n依据: a\n反证: b\n置信度(中)\n"
+            "候选3:\n名称: 运动员\n依据: a\n反证: b\n置信度(中)\n"
+            "候选4:\n名称: 射箭爱好者\n依据: a\n反证: b\n置信度(中)")
+    out = vision_client._dedupe_guess(text)
+    assert out.count("名称") == 3
+    assert "候选4" not in out
+
+
+def test_dedupe_guess_no_candidates_unchanged():
+    text = "推测：图中主体无法确定身份。"
+    assert vision_client._dedupe_guess(text) == text
 
 
 def test_mode_temperature(monkeypatch):
@@ -263,7 +427,7 @@ def test_analyze_unknown_scene_appends_conclusion(monkeypatch):
 # ---- 视觉路由器 v1：路由表查表 / 引擎分发 / 回退 ----
 
 def _router_table():
-    return {"document.chat": "ocr", "document.code": "ocr", "_default": "vlm"}
+    return {"document.chat": "ocr", "document.code": "code", "_default": "vlm"}
 
 
 def test_route_engine_lookup(monkeypatch):
@@ -414,7 +578,7 @@ def test_post_b64_local_ignores_cloud_model(monkeypatch):
 # ---- 引擎特化 1/2/3：表格 / GUI / 图表（qwen 占位）----
 
 def _engine_router():
-    return {"document.chat": "ocr", "document.code": "ocr",
+    return {"document.chat": "ocr", "document.code": "code",
             "document.table": "table", "chart": "vlm",
             "screenshot.software_ui": "gui", "_default": "vlm"}
 
@@ -426,6 +590,7 @@ def _engine_cfg():
         "prompts": {
             "extract_table": {"text": "把表格完整转为 Markdown，逐格提取，禁止编造。", "temperature": 0.2},
             "extract_gui": {"text": "枚举界面所有可交互元素，逐个给功能描述。", "temperature": 0.3},
+            "extract_code": {"text": "逐字符转写代码，严格区分数字1与小写l。", "temperature": 0.1},
             "zoom_chart": {"text": "先转表再给结论。", "temperature": 0.3},
             "zoom_generic": {"text": "通用。", "temperature": 0.3},
         },
@@ -525,3 +690,37 @@ def test_engine_table_passes_model_override(monkeypatch):
     monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
     vision_client._engine_table("/tmp/x.png", "document", "table", "", model="llava")
     assert captured["model"] == "llava"  # 引擎模型透传（v1.5 engine:model）
+
+
+def test_analyze_document_code_uses_extract_code_prompt(monkeypatch):
+    # 代码截图 → code 引擎（VLM 逐字转写），不落通用 OCR
+    captured = {}
+
+    def fake_post(b64, prompt, temperature, model=""):
+        captured["prompt"] = prompt
+        return "void foo() {\n    return 1;\n}"
+
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _engine_cfg())
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("代码", "document", "code"))
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: (_ for _ in ()).throw(AssertionError("代码不应走 zoom")))
+    out = vision_client.analyze("/tmp/x.png", "standard")
+    assert "void foo()" in out
+    assert "数字1" in captured["prompt"] or "逐字符" in captured["prompt"]  # 代码保真要求
+
+
+def test_engine_code_passes_model_override(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature, model=""):
+        captured["model"] = model
+        return "code"
+
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _engine_cfg())
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    vision_client._engine_code("/tmp/x.png", "document", "code", "", model="llava")
+    assert captured["model"] == "llava"
