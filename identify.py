@@ -75,22 +75,26 @@ def main():
             scene, sub = forced_scene, forced_sub
             desc = f"(手动指定: {scene}" + (f".{sub}" if sub else "") + ")"
         else:
-            desc, scene, sub = vision_client.scan(path)
+            parsed = vision_client.scan(path)
+            desc, scene, sub = parsed[0], parsed[1], parsed[2]
+            extra = parsed[3] if len(parsed) > 3 else []
 
     if mode == "--scan":
         print("[scan]")
         print(desc)
         print(f"\n大类: {scene}")
         print(f"小类: {sub or '无'}")
+        if extra:
+            print(f"内容: {', '.join(extra)}")
         return 0
 
     if mode == "--zoom":
         print(f"[zoom_{scene}" + (f".{sub}" if sub else "") + "]")
-        print(vision_client.zoom(path, scene, sub=sub, scan_desc=desc))
+        print(vision_client.zoom(path, scene, sub=sub, scan_desc=desc, extra=extra))
         return 0
 
     if mode == "--guess":
-        facts = vision_client.zoom(path, scene, sub=sub, scan_desc=desc)
+        facts = vision_client.zoom(path, scene, sub=sub, scan_desc=desc, extra=extra)
         print(f"[zoom_{scene}" + (f".{sub}" if sub else "") + " 事实]")
         print(facts)
         print("\n[guess 推测]")

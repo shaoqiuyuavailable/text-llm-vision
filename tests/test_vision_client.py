@@ -90,17 +90,51 @@ def _v2_mains():
 def test_parse_scene_v2_new_categories(monkeypatch):
     monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
     monkeypatch.setattr(vision_client, "_scenes", _v2_scenes)
-    assert vision_client._parse_scene("大类: vehicle\n小类: car") == ("vehicle", "car")
-    assert vision_client._parse_scene("大类: person\n小类: anime_character") == ("person", "anime_character")
-    assert vision_client._parse_scene("大类: unknown\n小类: 无") == ("unknown", "")
+    assert vision_client._parse_scene("大类: vehicle\n小类: car") == ("vehicle", "car", [])
+    assert vision_client._parse_scene("大类: person\n小类: anime_character") == ("person", "anime_character", [])
+    assert vision_client._parse_scene("大类: unknown\n小类: 无") == ("unknown", "", [])
     # 未知词 → generic 兜底
-    assert vision_client._parse_scene("这是一张截图。") == ("generic", "")
+    assert vision_client._parse_scene("这是一张截图。") == ("generic", "", [])
     # animal 无 sub → 强制清空
     monkeypatch.setattr(vision_client, "_scenes",
                         lambda: {"animal": {"sub": [], "default_sub": ""}, **dict(_v2_scenes())})
     monkeypatch.setattr(vision_client, "_valid_mains",
                         lambda: ("animal", "generic") + _v2_mains())
-    assert vision_client._parse_scene("大类: animal\n小类: 无") == ("animal", "")
+    assert vision_client._parse_scene("大类: animal\n小类: 无") == ("animal", "", [])
+
+
+def _mixed_scenes():
+    return {
+        "person": {"sub": ["real_single"], "default_sub": "real_single"},
+        "vehicle": {"sub": ["car"], "default_sub": "car"},
+        "document": {"sub": ["chat", "report", "table"], "default_sub": "report"},
+        "screenshot": {"sub": ["software_ui"], "default_sub": "software_ui"},
+        "unknown": {"sub": [], "default_sub": ""},
+        "generic": {"sub": [], "default_sub": ""},
+    }
+
+
+def test_parse_scene_extra_content_types(monkeypatch):
+    # 混合画面：scan 第三行「画面类型:」→ 类型列表（保序、过滤未知、容错分隔符、去重）
+    monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
+    monkeypatch.setattr(vision_client, "_scenes", _mixed_scenes)
+    assert vision_client._parse_scene("大类: document\n小类: report\n画面类型: chart, table") == \
+        ("document", "report", ["chart", "table"])
+    assert vision_client._parse_scene("大类: screenshot\n小类: software_ui\n画面类型: table") == \
+        ("screenshot", "software_ui", ["table"])
+    # 单内容图写 无 → 空列表
+    assert vision_client._parse_scene("大类: vehicle\n小类: car\n画面类型: 无") == ("vehicle", "car", [])
+    # 未知类型过滤 + 中文顿号容错 + 去重
+    assert vision_client._parse_scene("大类: document\n小类: report\n画面类型: chart、图标、table") == \
+        ("document", "report", ["chart", "table"])
+    # 老「内容:」标签兼容
+    assert vision_client._parse_scene("大类: document\n小类: report\n内容: chart, table") == \
+        ("document", "report", ["chart", "table"])
+    # 回显防线：指令整段被抄（行超长）→ 拒绝，防污染
+    assert vision_client._parse_scene("大类: document\n小类: report\n画面类型: 无 或 table,chart,code,ui（逗号分隔，最多列3个，按视觉占比从大到小排序）。") == \
+        ("document", "report", [])
+    # 老两行输出（无画面类型行）兼容
+    assert vision_client._parse_scene("大类: vehicle\n小类: car") == ("vehicle", "car", [])
 
 
 def test_scan_applies_default_sub(monkeypatch):
@@ -108,9 +142,10 @@ def test_scan_applies_default_sub(monkeypatch):
     monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
     monkeypatch.setattr(vision_client, "_valid_mains", _v2_mains)
     monkeypatch.setattr(vision_client, "_scenes", _v2_scenes)
-    _, scene, sub = vision_client.scan("/tmp/x.png")
+    _, scene, sub, extra = vision_client.scan("/tmp/x.png")
     assert scene == "vehicle"
     assert sub == "car"  # default_sub 接线
+    assert extra == []  # 无内容行 → 空列表
 
 
 def test_zoom_uses_new_scene_prompt(monkeypatch):
@@ -137,6 +172,47 @@ def test_zoom_missing_prompt_falls_back_generic(monkeypatch):
     monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
     vision_client.zoom("/tmp/x.png", scene="nonexistent_scene")
     assert "generic" in captured["prompt"]  # 缺 key → 回退 zoom_generic
+
+
+def test_zoom_injects_extra_content_header(monkeypatch):
+    # 混合画面：extra 类型 → header「画面内容：」中文标签（引擎自适应提取的输入）
+    captured = {}
+
+    def fake_post(b64, prompt, temperature, model=""):
+        captured["prompt"] = prompt
+        return "OK"
+
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: {
+        "prompts": {"zoom_document": {"text": "逐项提取", "temperature": 0.2},
+                    "zoom_generic": {"text": "通用", "temperature": 0.2}},
+        "ollama": {"temperature": 0.5},
+    })
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    vision_client.zoom("/tmp/x.png", scene="document", sub="report", extra=["chart", "table"])
+    assert "画面内容：图表、表格" in captured["prompt"]
+    assert "document" in captured["prompt"]
+
+
+def test_analyze_passes_extra_to_engine(monkeypatch):
+    # analyze：scan 第4元 extra 透传到引擎（主引擎不换、按内容类型自适应）
+    captured = {}
+
+    import config_loader
+    monkeypatch.setattr(vision_client, "scan",
+                        lambda p: ("描述", "document", "report", ["chart", "table"]))
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: captured.update(k) or "文档事实")
+    monkeypatch.setattr(vision_client, "guess", lambda *a, **k: "不应推测")
+    monkeypatch.setattr(vision_client, "spatial", lambda *a, **k: "")
+    monkeypatch.setattr(config_loader, "get", lambda: {
+        "router": {"document.report": "vlm"},
+        "prompts": {"zoom_document": {"text": "逐项提取", "temperature": 0.2}},
+        "ollama": {"model": "qwen2.5vl", "temperature": 0.5},
+    })
+    out = vision_client.analyze("/tmp/x.png", "deep")
+    assert captured["extra"] == ["chart", "table"]
+    assert "文档事实" in out
 
 
 def test_mode_temperature(monkeypatch):

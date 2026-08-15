@@ -92,10 +92,11 @@ _ANTI_HALLUC = ("只写图中能看到的事实，禁止编造；看不清的文
 
 _PROMPTS = {
     "scan": {
-        "text": "用一句简短中文描述图片主要内容。然后判断类别，严格输出两行：\n"
+        "text": "用一句简短中文描述图片主要内容。然后判断类别，严格输出三行：\n"
                 "大类: person(人物/角色，含真人/动漫/游戏/Cosplay/雕像/画作)|animal(动物)|plant(植物)|"
                 "food(食物)|vehicle(交通工具)|machine(机械设备)|architecture(建筑)|document(以文字为主的内容)|"
-                "chart(数据图)|diagram(结构示意图/流程图)|map(地图)|screenshot(软件/网页/终端界面截图)|"
+                "chart(数据图)|diagram(结构示意图/流程图)|map(地图)|screenshot(软件/网页/终端界面截图，"
+                "含窗口标题栏/菜单/按钮等界面元素)|"
                 "object(无生命物品)|meme(表情包/梗图)|scene(自然/城市/室内场景)|unknown(无法确定)\n"
                 "小类: 仅当大类是以下情况才填，否则填 无。person小类=real_single|real_group|anime_character|"
                 "game_character|cosplay|statue|painting|unknown；animal=mammal|bird|reptile|amphibian|fish|insect|unknown；"
@@ -103,9 +104,11 @@ _PROMPTS = {
                 "diagram=flowchart|org_chart|network|sequence|gantt|venn|unknown；screenshot=software_ui|website|chat|"
                 "terminal|error|settings|unknown；vehicle=car|motorcycle|truck|bus|train|airplane|ship|bicycle|unknown；"
                 "machine=industrial|household|electronics|tool|construction|unknown；其它大类小类填 无。\n"
-                "判定要点：代码不是图表(属document.code)；表格不是图表(属document.table)；纯表情包/梗图归meme；"
-                "界面截图归screenshot；地图归map而非chart；数据图归chart，结构关系图归diagram。\n"
-                "不要输出除这两行之外的任何内容。",
+                "画面类型: 无 或 table,chart,code,ui（逗号分隔，最多列3个，按视觉占比排序；界面截图写 ui）。\n"
+                "判定要点：带窗口标题栏/菜单栏/工具栏/状态栏的软件界面截图，即使内含数据表格或图表，"
+                "一律归screenshot；代码不是图表(属document.code)；纯表格/数据网格且无窗口元素的截图归document.table；"
+                "纯表情包/梗图归meme；地图归map而非chart；数据图归chart，结构关系图归diagram。\n"
+                "不要输出除这三行之外的任何内容。",
         "temperature": 0.15,
     },
     "zoom_person": {
@@ -149,7 +152,8 @@ _PROMPTS = {
         "text": f"{_ANTI_HALLUC}\n文字识别规则：清晰文字直接复制原文，模糊文字标 [无法识别]，"
                 "禁止根据上下文猜文字。\n逐项分析：1)文档类型(报告/聊天/代码/表单/表格/邮件) 2)标题(不存在写 无) "
                 "3)主题 4)关键内容 5)OCR文字(清晰原文/模糊[无法识别]) 6)布局结构(标题区/正文区/表格区/代码区) "
-                "7)特殊元素(代码提取语言与结构、表格提取行列关系、网页提取UI元素)。\n最后输出核心内容总结。",
+                "7)特殊元素(代码提取语言与结构；表格提取行列关系；网页提取UI元素；"
+                "图表先逐系列转 Markdown 表格核对数值，禁止凭视觉估算数值)。\n最后输出核心内容总结。",
         "temperature": 0.2,
     },
     "zoom_chart": {
@@ -211,17 +215,21 @@ _PROMPTS = {
     },
     # ── 引擎提示词（vision_client._ENGINES 占位实现用；接真正引擎时函数体替换，提示词保留可复用）──
     "extract_table": {
-        "text": f"{_ANTI_HALLUC}\n这是一张表格或含表格的图片，把表格完整转为 Markdown 表格：\n"
+        "text": f"{_ANTI_HALLUC}\n先判断画面：若是软件界面截图（含窗口标题栏/菜单/工具栏/状态栏），"
+                "先单独列出这些界面元素；若含图表，先逐系列把图表数据转成 Markdown 表格核对数值，"
+                "禁止凭视觉估算；再把表格区完整转为 Markdown 表格：\n"
                 "1) 先确定表头行与行列数 2) 逐行逐列提取每个单元格，保持原有行列结构 "
                 "3) 文字清晰直接照抄，模糊标 [无法识别]，禁止根据上下文猜文字 4) 空单元格写 【空】 "
-                "5) 表格标题/表注一并提取 6) 禁止编造或补全不存在的数值。\n只输出 Markdown 表格。",
+                "5) 表格标题/表注一并提取 6) 禁止编造或补全不存在的数值。\n"
+                "界面元素/图表/表格分节输出；纯表格图只输出 Markdown 表格。",
         "temperature": 0.2,
     },
     "extract_gui": {
         "text": f"{_ANTI_HALLUC}\n这是软件/网页界面截图，枚举界面中的元素：\n"
                 "1) 窗口/页面标题 2) 所有可交互元素（按钮/输入框/菜单/链接/图标/下拉框/复选框/开关）逐个列出 "
                 "3) 每个元素给出：元素名（文字原文照抄）、功能描述、大致位置（如 顶部/左下角） "
-                "4) 静态文本/标签也列出 5) 文字清晰照抄，模糊标 [无法识别]。\n按列表输出。",
+                "4) 静态文本/标签也列出 5) 若界面含数据表格或图表，按行提取其内容(表头/行/列/数值) "
+                "6) 文字清晰照抄，模糊标 [无法识别]。\n按列表输出。",
         "temperature": 0.3,
     },
     "spatial": {

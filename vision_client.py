@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """统一视觉识别客户端：三次判定 + 混合方案（大类判定 + 组合分支兜底）。
 
-    scan(path)                 -> (描述, 大类, 小类)   第1次：描述+场景判断
-    zoom(path, scene, sub)     -> 事实提取               第2次：按大类选清单，小类注入上下文
+    scan(path)                 -> (描述, 大类, 小类, 内容类型列表)  第1次：描述+场景+混合内容判断
+    zoom(path, scene, sub, extra) -> 事实提取          第2次：按大类选清单，小类+内容类型注入上下文
     guess(path, context, scene, sub, scan_desc) -> 推测   第3次：基于事实+场景
 
 提示词与采样参数从 config.json 读取（缺失回退 prompts.py）。
@@ -51,6 +51,11 @@ def _cache_on() -> bool:
 MAIN_SCENES = ("person", "animal", "plant", "food", "vehicle", "machine",
                "architecture", "document", "chart", "diagram", "map",
                "screenshot", "object", "meme", "scene", "unknown", "generic")
+
+# 混合画面内容类型（scan 第三行「内容:」）：固定小集合 → 特化提取映射。
+# 列表上限=集合大小(4)，实际 1-3；顺序=视觉占比从大到小（隐式主导度，不引权重数字）。
+_CONTENT_TYPES = ("table", "chart", "code", "ui")
+_CONTENT_LABELS = {"table": "表格", "chart": "图表", "code": "代码", "ui": "界面"}
 
 
 def _valid_mains() -> tuple:
@@ -260,8 +265,8 @@ def _to_b64(path_or_b64: str) -> str:
     return _downscale_b64(path_or_b64)
 
 
-def _parse_scene(text: str) -> tuple[str, str]:
-    """从 scan 输出解析 (大类, 小类)。容忍有标签(大类: X)与无标签(纯值)两种输出。"""
+def _parse_scene(text: str) -> tuple[str, str, list[str]]:
+    """从 scan 输出解析 (大类, 小类, 内容类型列表)。容忍有标签(大类: X)与无标签(纯值)两种输出。"""
     main, sub = "generic", ""
     all_subs = [s for d in _scenes().values() for s in d.get("sub", [])]
 
@@ -294,7 +299,22 @@ def _parse_scene(text: str) -> tuple[str, str]:
     # 兜底：大类没有小类时（animal/chart）强制清空，避免 8B 乱填
     if not _scenes().get(main, {}).get("sub"):
         sub = ""
-    return main, sub
+    # 第三行「画面类型:」：混合画面内容类型（table/chart/code/ui），逗号分隔、顺序=视觉主导度。
+    # 行级锚定防描述句误命中；缺失/「无」→ 空列表（老输出兼容）。
+    # 回显防线：8B 模型可能把指令整段当答案抄（如「画面类型: 无 或 table,chart,code,ui（逗号分隔…）」），
+    # 行超长即拒绝，防指令污染 extra。
+    extra = []
+    for line in text.splitlines():
+        m = re.search(r"(?:画面类型|内容)\s*[=:：]\s*(.+)", line)
+        if m:
+            val = m.group(1).strip().rstrip("。.")
+            if len(val) <= 20:
+                for tok in re.split(r"[，,、\s]+", val):
+                    tok = tok.strip().lower()
+                    if tok in _CONTENT_TYPES and tok not in extra:
+                        extra.append(tok)
+            break
+    return main, sub, extra
 
 
 def describe(path_or_b64: str, prompt: str = "") -> str:
@@ -390,22 +410,26 @@ def _parse_route_value(value: str) -> tuple[str, str]:
     return value.strip(), ""
 
 
-def _prompt_call(path_or_b64: str, prompt_key: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+def _prompt_call(path_or_b64: str, prompt_key: str, scene: str, sub: str, scan_desc: str,
+                 extra: list[str] | None = None, model: str = "") -> str:
     """引擎通用调用：取指定提示词条目，拼场景 header（与 zoom 同款结构），_post_b64 发送。
 
     供 _engine_table/_engine_gui 等提示词类引擎复用——接入专业引擎（rapid-table/OmniParser）
-    时替换引擎函数体，本助手保留给其它提示词类引擎用。"""
+    时替换引擎函数体，本助手保留给其它提示词类引擎用。extra=混合画面内容类型，注入 header。"""
     e = _entry(prompt_key)
     header = f"场景大类：{scene}"
     if sub:
         header += f"，小类：{sub}"
+    if extra:
+        header += "，画面内容：" + "、".join(_CONTENT_LABELS.get(t, t) for t in extra)
     if scan_desc.strip():
         header += f"\n第1次扫描的初步判断：\n{scan_desc.strip()}"
     prompt = f"{header}\n\n请基于以上信息，按以下要求处理：\n{e['text']}"
     return _post_b64(_to_b64(path_or_b64), prompt, e["temperature"], model=model)
 
 
-def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str,
+                extra: list[str] | None = None, model: str = "") -> str:
     """OCR 引擎（RapidOCR）：只提取文字。提取不足返回空串 → 调用方回退 vlm。"""
     text = ocr(path_or_b64)
     if len(text) >= 20:
@@ -413,25 +437,28 @@ def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: s
     return ""
 
 
-def _engine_vlm(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+def _engine_vlm(path_or_b64: str, scene: str, sub: str, scan_desc: str,
+                extra: list[str] | None = None, model: str = "") -> str:
     """VLM 引擎：走 zoom 按类提示词。model 非空时用指定模型（本地 ollama / 云端厂商）。"""
-    return zoom(path_or_b64, scene, sub=sub, scan_desc=scan_desc, model=model)
+    return zoom(path_or_b64, scene, sub=sub, scan_desc=scan_desc, extra=extra, model=model)
 
 
-def _engine_table(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+def _engine_table(path_or_b64: str, scene: str, sub: str, scan_desc: str,
+                  extra: list[str] | None = None, model: str = "") -> str:
     """表格引擎：完整提取表格 → Markdown。
 
     当前实现：VLM + 表格提取提示词（extract_table）。接入专业引擎（rapid-table /
     PP-StructureV3）时替换本函数体，_ENGINES 与路由不用动；模型由用户按需配置（engine:model）。"""
-    return _prompt_call(path_or_b64, "extract_table", scene, sub, scan_desc, model=model)
+    return _prompt_call(path_or_b64, "extract_table", scene, sub, scan_desc, extra=extra, model=model)
 
 
-def _engine_gui(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+def _engine_gui(path_or_b64: str, scene: str, sub: str, scan_desc: str,
+                extra: list[str] | None = None, model: str = "") -> str:
     """GUI 引擎：枚举界面可交互元素（VLM + extract_gui 提示词）。
 
     接入专业引擎（OmniParser / UI-TARS）时替换本函数体，_ENGINES 与路由不用动；
     模型由用户按需配置（engine:model）。"""
-    return _prompt_call(path_or_b64, "extract_gui", scene, sub, scan_desc, model=model)
+    return _prompt_call(path_or_b64, "extract_gui", scene, sub, scan_desc, extra=extra, model=model)
 
 
 # 引擎注册表：后续换专业引擎 = 加函数进注册表 + 改路由表指向，analyze 不动
@@ -449,14 +476,16 @@ _GUESS_SCENES = ("person", "animal", "plant", "food", "vehicle", "machine",
                  "architecture", "object", "meme", "scene")
 
 
-def _run_engine(engine: str, path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
-    """调引擎：未注册 / 异常返回空串（调用方回退 vlm，不报错）。回退记 warning 日志（兜底 + 可诊断）。"""
+def _run_engine(engine: str, path_or_b64: str, scene: str, sub: str, scan_desc: str,
+                extra: list[str] | None = None, model: str = "") -> str:
+    """调引擎：未注册 / 异常返回空串（调用方回退 vlm，不报错）。回退记 warning 日志（兜底 + 可诊断）。
+    extra=混合画面内容类型，透传给引擎提示词（自适应提取，不换引擎）。"""
     fn = _ENGINES.get(engine)
     if fn is None:
         log.warning("router: 引擎 %r 未注册（scene=%s.%s），回退 vlm", engine, scene, sub)
         return ""
     try:
-        return fn(path_or_b64, scene, sub, scan_desc, model=model)
+        return fn(path_or_b64, scene, sub, scan_desc, extra=extra, model=model)
     except Exception as e:
         log.warning("router: 引擎 %s 异常 %s: %s（scene=%s.%s model=%s），回退 vlm",
                     engine, type(e).__name__, e, scene, sub, model or "-")
@@ -477,18 +506,22 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
     precision = (precision or "fast").lower()
     if precision == "fast":
         # fast 也走 scan：1 次调用即含描述+类别（scan 提示词自带描述要求），供 scene 推理
-        desc, scene, sub = scan(path_or_b64)
+        parsed = scan(path_or_b64)
+        desc, scene = parsed[0], parsed[1]
         return f"【初步判断】{desc}\n【场景】{scene}"
-    # standard / deep：先 scan 判场景，再按路由表选引擎（视觉路由器 v1.5）
-    desc, scene, sub = scan(path_or_b64)
+    # standard / deep：先 scan 判场景 + 内容类型，再按路由表选引擎（视觉路由器 v1.5）
+    parsed = scan(path_or_b64)
+    desc, scene, sub = parsed[0], parsed[1], parsed[2]
+    extra = parsed[3] if len(parsed) > 3 else []  # 混合画面内容类型（旧调用方 3 元组兼容）
     # 路由：scene(.sub) → "引擎" | "引擎:模型"（用户自行配置，场景与模型解耦）。
     # 引擎未注册 / 异常 / 输出不足 / 模型缺失 → 回退全局 vlm（兜底 + log.warning）。
+    # 混合内容：extra 注入引擎 header，主引擎按内容类型自适应提取（不换引擎、不二次调用）。
     engine, model = _parse_route_value(_route_engine(scene, sub))
-    facts = _run_engine(engine, path_or_b64, scene, sub, desc, model=model)
+    facts = _run_engine(engine, path_or_b64, scene, sub, desc, extra=extra, model=model)
     ocr_used = bool(facts and engine == "ocr")
     if not facts:
         model = ""  # 指定模型失败/缺失 → guess/spatial 也用全局模型
-        facts = _run_engine("vlm", path_or_b64, scene, sub, desc) or "[识别失败（引擎异常），已回退]"
+        facts = _run_engine("vlm", path_or_b64, scene, sub, desc, extra=extra) or "[识别失败（引擎异常），已回退]"
     if precision == "standard":
         tag = "[OCR]" if ocr_used else "[视觉]"
         return f"【初步判断】{desc}\n【场景】{scene}\n【细节({tag})】\n{facts}"
@@ -515,22 +548,24 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
     return base
 
 
-def scan(path_or_b64: str) -> tuple[str, str, str]:
-    """第1次：一句话描述 + 判断大类+小类。返回 (描述, 大类, 小类)。"""
+def scan(path_or_b64: str) -> tuple[str, str, str, list[str]]:
+    """第1次：一句话描述 + 判断大类+小类 + 内容类型列表。返回 (描述, 大类, 小类, extra)。"""
     e = _entry("scan")
     text = _post_b64(_to_b64(path_or_b64), e["text"], e["temperature"])
-    main, sub = _parse_scene(text)
+    main, sub, extra = _parse_scene(text)
     if not sub:
         # 接线 default_sub：scan 未给出小类时用该大类的默认小类（document 默认 report 不触发 OCR 路由）
         sub = _scenes().get(main, {}).get("default_sub", "") or ""
-    return text, main, sub
+    return text, main, sub, extra
 
 
-def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str = "", model: str = "") -> str:
+def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str = "",
+         extra: list[str] | None = None, model: str = "") -> str:
     """第2次：按大类选 zoom 清单，小类作为上下文注入。
 
     scene 能否 zoom 取决于有没有 zoom_<scene> 提示词；缺失（如 config 新增类漏配）回退 generic，
-    避免发「只有 header、正文空」的请求。model 非空时用指定模型（v1.5 场景模型）。"""
+    避免发「只有 header、正文空」的请求。extra=混合画面内容类型（表格/图表/代码/界面），注入 header，
+    让引擎对混合内容自适应提取（主引擎不换、不二次调用）。model 非空时用指定模型（v1.5 场景模型）。"""
     if f"zoom_{scene}" not in config_loader.get()["prompts"]:
         scene = "generic"
     e = _entry(f"zoom_{scene}")
@@ -538,6 +573,8 @@ def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str
     header = f"场景大类：{scene}"
     if sub:
         header += f"，小类：{sub}"
+    if extra:
+        header += "，画面内容：" + "、".join(_CONTENT_LABELS.get(t, t) for t in extra)
     if scan_desc.strip():
         header += f"\n第1次扫描的初步判断：\n{scan_desc.strip()}"
     prompt = f"{header}\n\n请基于以上信息，按以下清单逐项提取更精确的事实：\n{e['text']}"

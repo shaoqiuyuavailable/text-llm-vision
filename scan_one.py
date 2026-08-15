@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""对单张图片跑第1次 scan（描述+场景判断），输出干净 JSON 供脚本/代理使用。
+"""对单张图片跑第1次 scan（描述+场景+混合内容类型判断），输出干净 JSON 供脚本/代理使用。
 
 用法：python scan_one.py <图片路径>
-输出：{"path":..., "main":..., "sub":..., "desc":...}
+输出：{"path":..., "main":..., "sub":..., "extra":[...], "desc":...}
 """
 import json
 import sys
@@ -17,8 +17,11 @@ def main():
         return 1
     path = sys.argv[1]
     try:
-        desc, main, sub = vision_client.scan(path)
-        print(json.dumps({"path": path, "main": main, "sub": sub, "desc": desc}, ensure_ascii=False))
+        parsed = vision_client.scan(path)
+        desc, main, sub = parsed[0], parsed[1], parsed[2]
+        extra = parsed[3] if len(parsed) > 3 else []
+        print(json.dumps({"path": path, "main": main, "sub": sub, "extra": extra, "desc": desc},
+                         ensure_ascii=False))
         return 0
     except Exception as e:
         print(json.dumps({"path": path, "error": str(e)}, ensure_ascii=False))
