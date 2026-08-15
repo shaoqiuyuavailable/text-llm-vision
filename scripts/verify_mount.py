@@ -53,11 +53,11 @@ def main():
     print()
     if ok:
         print("✅ 静态检查通过。挂载命令：")
-        print('  cd D:\\deepseek-harness')
-        print(f'  pnpm dsh web --patch "{ROOT / "cordis.yml"}"')
+        print('  pnpm dsh plugin --profile web add <插件目录>')
+        print('  （或已挂载时直接重启 dsh）')
         print()
         print("GUI 配置：设置 → 插件 → dsh-vision 卡片")
-        print("回归测试：python scripts/test_cli.py")
+        print("回归测试：python scripts/test_all.py")
     else:
         print("❌ 有未通过项，请按提示修复后重试。")
     return 0 if ok else 1

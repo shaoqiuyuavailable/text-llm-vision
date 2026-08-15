@@ -1,15 +1,13 @@
 # dsh-vision 外接视觉插件装载补丁（bundle 标准命名）
-# 用法: pnpm dsh web --patch "F:\code of PY\dsh_vision\cordis.patch.yml"
-# 如需永久启用，把下面的 insert 合并进 $DSH_HOME/profiles/<name>/cordis.patch.yml
+# 作为 profile bundle 安装：pnpm 装入 profile 后自动加入 dsh.profile.bundles。
+# name 用包名 dsh-vision，Node 解析 profile 安装目录找到已安装的代码。
 - insert:
     - id: dsh-vision
-      name: 'file:///F:/code of PY/dsh_vision/src/index.ts'
+      name: dsh-vision
       config:
         # Python 解释器；Windows 默认 python，其它平台默认 python3
         python: !!js >
           process.platform === 'win32' ? 'python' : 'python3'
-        # 插件根目录（vision_cli.py 所在）
-        visionDir: 'F:/code of PY/dsh_vision'
         # 默认识别精度: fast | standard | deep
         precision: standard
         # 单次识别超时（毫秒）

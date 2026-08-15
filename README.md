@@ -43,15 +43,18 @@ dsh (DeepSeek Harness, 纯文本模型)
 |------|------|
 | `cordis.patch.yml` | dsh 插件装载补丁（标准 bundle patch，`--patch` 或合并进 profile patch） |
 | `cordis.yml` | 同上，兼容别名 |
-| `src/index.ts` | dsh 原生插件：注册 4 个视觉工具 + 粘贴图自动转文字 |
+| `src/index.ts` | dsh 原生插件：注册 5 个视觉工具 + 粘贴图自动转文字 + GUI 配置同步 |
 | `python/vision_cli.py` | Python 侧 CLI：统一调 `vision_client` 的 analyze/ocr/locate/compare |
+| `python/vision_client.py` | 识别引擎（自包含，visual-ds v2 基线：5 引擎路由/混合场景/缓存） |
+| `python/config_loader.py` | 配置读取（默认 `~/.dsh/vision/config.json`，v2 路由基线） |
+| `python/prompts.py` | v2 提示词体系 + 路由/模型基线表（随插件部署） |
 | `python/config.json` | 视觉引擎配置（Ollama 地址/模型/温度等），可被 `~/.dsh/vision/config.json` 覆盖 |
 | `python/requirements.txt` | Python 依赖 |
-| `scripts/install.py` | 把 visual-ds 核心识别文件复制到 `~/.dsh/vision` 并改路径（可选） |
-| `scripts/verify_mount.py` | 静态验证插件文件/依赖/配置，并打印挂载命令 |
-| `panel/server.py` | 本地 Web 控制面板服务（参考 vscode-ext） |
-| `panel/index.html` | 控制面板前端：档位/后端/端口/Ollama/上游/挂载检查 |
-| `AGENTS.md` | dsh 会话软规则模板 |
+| `scripts/install.py` | 一键安装/配置（check/deps/local/cloud/deploy/mount/test/all 可选项） |
+| `scripts/verify_mount.py` | 静态验证插件文件/自包含识别库/配置，并打印挂载命令 |
+| `scripts/test_all.py` | 全量回归测试入口（82 用例：CLI/引擎/配置三套件） |
+| `panel/` | 旧 8790 控制面板（**已退役**，源码保留参考，勿启动） |
+| `AGENTS.md` | dsh 会话软规则模板 + GUI 配置指引 |
 
 ## 快速开始（源码运行 dsh）
 
@@ -102,27 +105,9 @@ pnpm dsh plugin --profile web add D:/deepseek-harness/plugins/dsh-vision   # 挂
 
 - **单一识别引擎**：所有入口（工具、粘贴兜底、CLI）都走 `python/vision_cli.py` → `vision_client`，不重复实现视觉逻辑。
 - **三层容错**：工具失败不阻塞主流程；粘贴图识别失败时替换为占位文字，保证纯文本模型永远不收到 image block。
-- **本地优先、零费用**：默认 Ollama，数据不出机器；可通过 `python/config.json` 切换到 OpenAI 兼容云端。
-- **轻插件**：dsh 侧只做工具注册和事件改写，重活全在 Python 侧，便于复用 visual-ds 的 Scan/Zoom/Guess 流水线。
-- **幂等/可回退**：插件只是 `--patch`，不修改 dsh 源码；卸载即移除能力。
-
-## 控制面板
-
-参考 visual-ds 的 vscode-ext，做了一个本地 Web 控制面板，复用现有 `~/.claude/vision-eyes/config.json`、state 和 Ollama 环境：
-
-```bash
-python "F:\code of PY\dsh_vision\panel\server.py" --port 8790
-```
-
-打开 `http://127.0.0.1:8790`，可以：
-
-- 查看/切换视觉档位 `off/fast/standard/deep`
-- 切换本地/云端后端、修改端口
-- 修改 Ollama 温度 / top_p / grounding
-- 修改 Anthropic / OpenAI 上游
-- 查看云端厂商和挂载检查状态
-
-控制面板直接复用 visual-ds 的 `control_api.py`，不重复实现配置读写。
+- **本地优先、零费用**：默认 Ollama，数据不出机器；可通过 GUI 或 `python/config.json` 切换到 OpenAI 兼容云端。
+- **薄插件**：dsh 侧只做工具注册和事件改写，重活全在 Python 引擎；改引擎不碰 dsh，改 dsh 不碰引擎。
+- **幂等/可回退**：插件通过 profile bundle 安装/卸载；本体改动仅 4 处（见 `docs/upstream-changes.md`），升级 dsh 后需重新核对。
 
 ## 验证挂载
 
@@ -130,7 +115,7 @@ python "F:\code of PY\dsh_vision\panel\server.py" --port 8790
 python "F:\code of PY\dsh_vision\scripts\verify_mount.py"
 ```
 
-它会静态检查 `cordis.yml`、`src/index.ts`、`python/vision_cli.py`、visual-ds 可导入性、配置文件是否存在，并给出实际挂载命令。
+它会静态检查 `cordis.yml`、`src/index.ts`、自包含识别库（vision_client/config_loader/prompts）、配置文件是否存在，并给出实际挂载命令。
 
 ## 自定义
 
