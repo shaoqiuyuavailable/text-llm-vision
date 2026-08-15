@@ -175,3 +175,45 @@ pnpm dsh web
 - **改动 3、4 是 UI 层**：不重建 bundle 不影响 host 功能，只影响显示。
 - 插件自身（`plugins/dsh-vision/`）不在上述改动内；它通过 profile bundle 机制加载，
   卸载/重装不影响本体。
+
+---
+
+## 影响分析（改动后 dsh 行为变化）
+
+| 场景 | 改动前 | 改动后 |
+|------|--------|--------|
+| 主会话粘贴图 + 插件在 | 网关拒绝（"当前模型不支持图片"）| 放行 → 插件识别 → 文本进上下文 ✅ |
+| 主会话粘贴图 + **插件不在** | 网关友好拒绝 | 放行 → serializer 拒绝 `UNSUPPORTED_CONTENT`（错误更晚、更技术化）⚠️ |
+| 子代理续对话发图 | 客户端拦截（SUBAGENT_IMAGE_UNSUPPORTED）| **不受影响**（客户端层拦截，与 adapter 声明无关）✅ |
+| 模型选择器显示 | DeepSeek 标"纯文本" | 标"支持图片"（轻微误导：serializer 仍拒发）⚠️ |
+| 会话恢复含图历史 | 不可能（图从未入流）| 若插件未挂载时产生过含图消息 → 恢复时 serializer 拒绝 → **会话恢复失败** ⚠️（实际中插件卸载前图已被转文本，风险很低）|
+| 其他插件 | 无法接触图片 | 也能读到入流的图片块（生态效应）|
+
+**总结**：改动 1 是"全局开关"——把图片入流的决策从**网关提前拒绝**改为**serializer 兜底拒绝**。
+数据始终安全（图片永不真正发给 DeepSeek API，只 fail loud）；体验在"插件不在"时降级。
+改动 2/3/4 影响局部且无副作用（命名空间白名单追加、带标记块过滤、卡片按可用性隐藏）。
+
+---
+
+## 与其他视觉插件（dsh-vision-router）的兼容性
+
+两个插件都处理图片，但机制不同，**物理兼容、语义由加载顺序决定**：
+
+| | dsh-vision | dsh-vision-router |
+|---|---|---|
+| 粘贴图处理 | pre-step 自动识别 → 文本进上下文 | pre-step 改写为文本标记 → **等模型调 vision_describe** |
+| 工具返回图 | 不处理 | tool/result 阴影替换（issue #74 方案）|
+| 模型接管 | 不接管路由 | **stealth 模式接管 deepseek-official**（动态注册 adapter 声明 image）|
+
+**关键冲突点：router 的 stealth 模式**。它默认开启，会重建 `deepseek-official` 路由并
+声明 image 输入——与改动 1 的声明**重复**，可能触发 `DUPLICATE_ADAPTER`（router 自身有
+fallback，但行为不可控）。
+
+**共存建议**：
+1. **router 关 stealth**（`stealth: false`）——改动 1 已提供图片放行，无需它接管路由
+2. **router 关 image-block 重写**（`rewriteImages: false`）——让 dsh-vision 独享粘贴图
+   自动识别，router 只提供 13 个像素工具（crop/pixel_diff/trace 等）
+3. 两者 pre-step 是 waterfall 串行：**先加载者先处理**，后加载者看不到 image 块就透传，
+   不会双重改写/崩溃
+
+**最佳组合**：dsh-vision 管"粘贴自动识别 + 气泡原图"，router 管"像素级工具"——各管一段，零重叠。
