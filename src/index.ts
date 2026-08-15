@@ -3,7 +3,8 @@
  *
  * Two responsibilities:
  *  1. Register model-facing tools that delegate to python/vision_cli.py,
- *     which reuses the visual-ds Scan/Zoom/Guess engine.
+ *     which runs the self-contained Scan/Zoom/Guess engine (python/vision_client.py,
+ *     migrated from the sealed visual-ds v2 baseline).
  *  2. Listen to agent/pre-step and replace pasted image blocks with local
  *     vision text before a text-only DeepSeek adapter can reject them.
  *

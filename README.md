@@ -151,11 +151,10 @@ DeepSeek 官方模型是纯文本，官方视觉方案（`read_image`）需要�
 | `python/config.json` | 引擎默认配置（可被 `~/.dsh/vision/config.json` 覆盖） |
 | `scripts/install.py` | 一键安装（check/deps/local/cloud/deploy/mount/test/all） |
 | `scripts/verify_mount.py` | 静态挂载检查 |
-| `scripts/test_all.py` | 全量回归（82 用例） |
-| `scripts/smoke-apply.mjs` | Node 侧冒烟（插件 apply 不抛错） |
+| `scripts/test_all.py` | 全量回归（89 用例 + Node 冒烟） |
+| `scripts/smoke-apply.mjs` | Node 侧冒烟（6 工具 + 命名空间断言） |
 | `docs/upstream-changes.md` | **本体源码改动记录（升级必读）** |
 | `docs/architecture.md` | 架构设计 |
-| `panel/` | 旧 8790 面板（**已退役**，勿启动） |
 | `AGENTS.md` | 会话软规则模板 + GUI 配置指引 |
 
 ---
