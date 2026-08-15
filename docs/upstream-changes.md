@@ -129,12 +129,14 @@ pnpm --filter @deepseek-ai/dsh-web-frontend run build
 **目录**：`packages/client/ui-settings-plugins/src/client/`
 
 **新增文件**：
-- `VisionCard.tsx` — dsh-vision 卡片 UI（12 个配置控件）
+- `VisionCard.tsx` — dsh-vision 卡片 UI（档位下拉/模型/超时/Ollama/上游/云端/路由控件）
 - `vision-card-controller.ts` — 表单逻辑（CardForm 模式 + JSON 字段）
+- `JsonRowEditor.tsx` — 云端厂商/场景路由的行编辑器（路由引擎下拉、厂商行输入、空列表提示、非法 JSON 回退文本编辑）
+- `fields.tsx` 新增 `SelectField`（档位下拉）、`fields.module.css` 新增行编辑器样式
 
 **修改文件**：
 - `index.ts` — 实例化 `VisionCardController`、注册 `settings.plugin.item` 槽（id `dsh-vision`, order 30）
-- `locales.ts` — 新增 `vision*` 系列中英文案键
+- `locales.ts` — 新增 `vision*` 系列中英文案键（行编辑操作说明）
 
 **升级核对**：搜索 `dsh-vision`，确认卡片注册存在。改后需重建：
 ```bash
