@@ -14,7 +14,7 @@
   3. **GUI 配置**（settings 命名空间）：新配置项 = schema 加字段 + 卡片加控件，模式现成
 - 开发自检：`python scripts/test_cli.py`（回归）+ `python scripts/verify_mount.py`（挂载检查）
 - 想分享你的定制版？Fork 本仓库 → 改 → PR，或发布你自己的 npm 包均可
-- 反馈/建议/问题：GitHub Issues（见仓库首页）
+- 反馈/建议/问题：GitHub Issues（见仓库首页）——**本人心情好才看一眼修一下，心情不好请自行拉取二次开发，反正 MIT 都随你折腾**
 
 ## 架构
 
