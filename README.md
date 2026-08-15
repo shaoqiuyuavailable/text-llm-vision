@@ -3,6 +3,19 @@
 > 参考 `F:\code of PY\visual-ds` 的“MCP 主路径 + 代理兜底 + 软规则三层互补”思想，为 DeepSeek Harness (`dsh`) 做适配。
 > 核心目标：让 dsh 默认的纯文本 DeepSeek 模型也能“看见”图片——图片进、文字描述出，全程本地、零 API 费用。
 
+## 🎉 开源与二次开发
+
+**热烈欢迎各位个人开发者对本项目进行二次开发与个性化定制！**
+
+- 本插件 MIT 协议开源，代码结构刻意保持"薄插件"设计：dsh 侧只做工具注册/事件改写/配置，重活全在 Python 引擎，**改引擎不碰 dsh，改 dsh 不碰引擎**
+- 三大可定制面：
+  1. **识别引擎**（`python/vision_client.py` + `prompts.py`）：换模型、改提示词、加场景、加引擎（如接入 rapid-table / OmniParser / UI-TARS 只需替换引擎函数体，路由表不用动）
+  2. **工具面**（`src/index.ts`）：加工具、改描述、调参数，全部走 `defineTool` 标准接口
+  3. **GUI 配置**（settings 命名空间）：新配置项 = schema 加字段 + 卡片加控件，模式现成
+- 开发自检：`python scripts/test_cli.py`（回归）+ `python scripts/verify_mount.py`（挂载检查）
+- 想分享你的定制版？Fork 本仓库 → 改 → PR，或发布你自己的 npm 包均可
+- 反馈/建议/问题：GitHub Issues（见仓库首页）
+
 ## 架构
 
 ```
