@@ -113,6 +113,9 @@ const IMAGE_EXT: Record<string, string> = {
   'image/gif': '.gif',
 }
 
+/** 模块级日志：apply 时绑定 ctx.logger，供 runVision 等模块级函数使用。 */
+let logger: { info(msg: string, ...args: unknown[]): void; warn(msg: string, ...args: unknown[]): void } | undefined
+
 function runVision(
   python: string,
   cli: string,
@@ -120,6 +123,8 @@ function runVision(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<string> {
+  const started = Date.now()
+  const log = logger
   return new Promise((resolve, reject) => {
     const child = spawn(python, [cli, ...args], {
       cwd: ROOT,
@@ -156,6 +161,9 @@ function runVision(
       signal?.removeEventListener('abort', onAbort)
       reject(error)
     }
+  }).finally(() => {
+    // 统一耗时日志：所有识别调用（工具/粘贴兜底）都经 runVision。
+    log?.info('[dsh-vision] vision_cli %s took %dms', args[0], Date.now() - started)
   })
 }
 
@@ -169,21 +177,9 @@ const LEVEL_TO_NUM: Record<string, number> = { off: 0, fast: 1, standard: 2, dee
  * 把 GUI 设置同步到 ~/.dsh/vision/config.json + state：
  * vision_cli.py 每次调用都是新进程，读文件即生效，无需重启。
  * 仅覆盖面板可配置的键，保留 scenes/prompts 等引擎内部结构。
+ * @param cfg - 当前生效配置（组合配置 + GUI settings 覆盖后的值）。
  */
-async function syncVisionConfig(cfg: {
-  model?: string
-  ollamaUrl?: string
-  temperature?: number
-  topP?: number
-  grounding?: boolean
-  upstream?: string
-  upstreamOpenai?: string
-  precision?: string
-  level?: string
-  cloudActive?: string
-  clouds?: CloudProvider[]
-  router?: Record<string, string>
-}): Promise<void> {
+async function syncVisionConfig(cfg: Config): Promise<void> {
   try {
     await mkdir(join(homedir(), '.dsh', 'vision'), { recursive: true })
     let data: Record<string, unknown> = {}
@@ -289,6 +285,7 @@ function rulesText(): string {
 }
 
 export function apply(ctx: Context, config: Config = {}): void {
+  logger = ctx.logger
   const python = config.python || DEFAULT_PYTHON
   const cli = config.visionDir ? join(config.visionDir, 'python', 'vision_cli.py') : DEFAULT_CLI
 
@@ -447,7 +444,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           continue
         }
         const stored = await ctx.attachments.readImage(block.attachment, signal)
-          ctx.logger.info('[dsh-vision] intercepting pasted image: %s (%d bytes)', block.attachment.mediaType, block.attachment.bytes)
+        ctx.logger.info('[dsh-vision] intercepting pasted image: %s (%d bytes)', block.attachment.mediaType, block.attachment.bytes)
         // 同图去重：同一字节内容在进程内只识别一次（防重复计费/耗时）。
         const precision = effectivePrecision(cfg().level, cfg().precision)
         const digest = imageDigest(stored.data)
@@ -481,7 +478,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           dshVision: true,
           dshAttachment: attachment,
         } as ContentBlock)
-          ctx.logger.info('[dsh-vision] pasted image converted, result chars=%d', text.length)
+        ctx.logger.info('[dsh-vision] pasted image converted, result chars=%d', text.length)
       } catch (error) {
         ctx.logger.warn('[dsh-vision] paste image conversion failed: %o', error)
         converted.push({
