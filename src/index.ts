@@ -114,7 +114,15 @@ const IMAGE_EXT: Record<string, string> = {
 }
 
 /** 模块级日志：apply 时绑定 ctx.logger，供 runVision 等模块级函数使用。 */
-let logger: { info(msg: string, ...args: unknown[]): void; warn(msg: string, ...args: unknown[]): void } | undefined
+interface VisionLogger {
+  debug(msg: string, ...args: unknown[]): void
+  info(msg: string, ...args: unknown[]): void
+  warn(msg: string, ...args: unknown[]): void
+}
+let logger: VisionLogger | undefined
+
+/** 单次子进程 stdout/stderr 捕获上限：防异常输出撑爆内存（超限截断并标记）。 */
+const VISION_OUTPUT_CAP = 1_000_000 // 1MB
 
 function runVision(
   python: string,
@@ -125,6 +133,7 @@ function runVision(
 ): Promise<string> {
   const started = Date.now()
   const log = logger
+  log?.debug('[dsh-vision] spawn %s %s %o', python, cli, args)
   return new Promise((resolve, reject) => {
     const child = spawn(python, [cli, ...args], {
       cwd: ROOT,
@@ -133,6 +142,8 @@ function runVision(
     })
     let stdout = ''
     let stderr = ''
+    let stdoutCapped = false
+    let stderrCapped = false
     let settled = false
     const timer = setTimeout(() => {
       child.kill()
@@ -141,15 +152,38 @@ function runVision(
     const onAbort = () => child.kill()
     signal?.addEventListener('abort', onAbort, { once: true })
 
-    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8') })
-    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (stdout.length < VISION_OUTPUT_CAP) {
+        stdout += chunk.toString('utf8')
+        if (stdout.length > VISION_OUTPUT_CAP) {
+          stdout = stdout.slice(0, VISION_OUTPUT_CAP)
+          stdoutCapped = true
+        }
+      } else {
+        stdoutCapped = true
+      }
+    })
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (stderr.length < VISION_OUTPUT_CAP) {
+        stderr += chunk.toString('utf8')
+        if (stderr.length > VISION_OUTPUT_CAP) {
+          stderr = stderr.slice(0, VISION_OUTPUT_CAP)
+          stderrCapped = true
+        }
+      } else {
+        stderrCapped = true
+      }
+    })
     child.on('error', (error) => fail(error))
     child.on('close', (code) => {
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
+      const ms = Date.now() - started
       if (code === 0) {
+        log?.info('[dsh-vision] vision_cli %s took %dms (out=%d%s)', args[0], ms, stdout.length, stdoutCapped ? '+capped' : '')
         resolve(stdout.trim())
       } else {
+        log?.warn('[dsh-vision] vision_cli %s failed code=%d after %dms (err=%d%s)', args[0], code, ms, stderr.length, stderrCapped ? '+capped' : '')
         fail(new Error(stderr.trim() || `dsh-vision: vision_cli exited with code ${code}`))
       }
     })
@@ -161,9 +195,6 @@ function runVision(
       signal?.removeEventListener('abort', onAbort)
       reject(error)
     }
-  }).finally(() => {
-    // 统一耗时日志：所有识别调用（工具/粘贴兜底）都经 runVision。
-    log?.info('[dsh-vision] vision_cli %s took %dms', args[0], Date.now() - started)
   })
 }
 
@@ -236,8 +267,7 @@ async function syncVisionConfig(cfg: Config): Promise<void> {
     }
   } catch (error) {
     // 同步失败不阻断插件运行：识别时 vision_cli 会回退到插件自带 config.json。
-    // eslint-disable-next-line no-console
-    console.error('[dsh-vision] sync vision config failed:', error)
+    logger?.warn('[dsh-vision] sync vision config failed: %o', error)
   }
 }
 
@@ -251,6 +281,26 @@ async function syncVisionConfig(cfg: Config): Promise<void> {
  */
 const VISION_CACHE_MAX = 64
 const visionCache = new Map<string, { text: string; precision: string }>()
+
+/** Ollama 模型列表缓存（15s TTL，供 GUI 模型下拉）。 */
+let ollamaModelsCache: { ts: number; models: string[] } = { ts: 0, models: [] }
+const OLLAMA_MODELS_TTL = 15_000
+
+/** 探测 Ollama /api/tags 获取已安装模型名列表；失败返回空数组（GUI 回退文本框）。 */
+async function fetchOllamaModels(url: string | undefined): Promise<string[]> {
+  const base = (url ?? 'http://localhost:11434/api/generate').split('/api/')[0]
+  if (Date.now() - ollamaModelsCache.ts < OLLAMA_MODELS_TTL) return ollamaModelsCache.models
+  try {
+    const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) return []
+    const data = await res.json() as { models?: Array<{ name?: string }> }
+    const models = (data.models ?? []).map(m => m.name ?? '').filter(Boolean)
+    ollamaModelsCache = { ts: Date.now(), models }
+    return models
+  } catch {
+    return []
+  }
+}
 
 /** 计算图片字节的 sha256（缓存 key，内容寻址天然安全）。 */
 function imageDigest(data: Uint8Array): string {
@@ -304,6 +354,19 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
   })
   const cfg = (): Config => current()
+
+  // Ollama 模型列表路由：GUI 模型下拉的数据源（webServer 可选注入，缺失时 GUI 回退文本框）。
+  ctx.inject(['webServer'], (wctx) => {
+    wctx.effect(() => wctx.webServer.register({
+      kind: 'prefix',
+      path: '/dsh-vision/ollama-models',
+      handler: async (_req, res) => {
+        const models = await fetchOllamaModels(cfg().ollamaUrl)
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' })
+        res.end(JSON.stringify({ models }))
+      },
+    }), 'dsh-vision: ollama models route')
+  })
 
   // ---------- 1. 模型主动看图工具 ----------
   ctx.tools.register(defineTool({
@@ -455,6 +518,8 @@ export function apply(ctx: Context, config: Config = {}): void {
       // 附件引用随识别文本一起持久化：模型只读 text 字段（照常收到识别文本），
       // GUI 渲染时用 dshAttachment 显示原图缩略图（用户侧历史回溯）。
       const attachment = block.attachment
+      // 识别起始时间：用于长识别耗时提示（进度反馈的轻量形态）。
+      const startedAt = Date.now()
       let tmpDir: string | undefined
       try {
         // 档位 off：不调本地识别，直接占位（原图附件仍保留给 GUI）。
@@ -486,17 +551,39 @@ export function apply(ctx: Context, config: Config = {}): void {
         tmpDir = await mkdtemp(join(tmpdir(), 'dsh-vision-'))
         const file = join(tmpDir, `pasted${ext}`)
         await writeFile(file, Buffer.from(stored.data))
-        const text = await runVision(
-          python,
-          cli,
-          ['describe', file, '--precision', precision],
-          cfg().timeoutMs || 120000,
-          signal,
-        )
+        // 识别 + 失败降档重试：deep 失败 → standard 重试一次（快速失败不重试，
+        // 避免重复计费/耗时；识别失败无计费风险，降档是白赚的鲁棒性）。
+        let text: string
+        try {
+          text = await runVision(
+            python,
+            cli,
+            ['describe', file, '--precision', precision],
+            cfg().timeoutMs || 120000,
+            signal,
+          )
+        } catch (error) {
+          if (precision !== 'standard' && precision !== 'fast') {
+            ctx.logger.warn('[dsh-vision] %s recognition failed, retrying standard: %o', precision, error)
+            text = await runVision(
+              python,
+              cli,
+              ['describe', file, '--precision', 'standard'],
+              cfg().timeoutMs || 120000,
+              signal,
+            )
+          } else {
+            throw error
+          }
+        }
         cacheSet(digest, precision, text)
+        const elapsedMs = Date.now() - startedAt
+        // 识别进度反馈（轻量）：长识别（>5s）在文本头部标注耗时，让用户感知
+        // 识别确实发生了且耗时来源（而非"卡住"）。
+        const durationNote = elapsedMs > 5000 ? `（识别耗时 ${Math.round(elapsedMs / 1000)}s）` : ''
         converted.push({
           type: 'text',
-          text: `[用户粘贴图片，已由本地视觉识别]\n${text}`,
+          text: `[用户粘贴图片，已由本地视觉识别${durationNote}]\n${text}`,
           // 标记为视觉识别产物：模型照常收到，但 GUI 渲染跳过（用户消息块
           // 只显示用户自己的话，不显示识别文本）；dshAttachment 供 GUI 读回原图。
           dshVision: true,

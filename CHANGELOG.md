@@ -4,6 +4,15 @@
 
 ## [0.1.0] - 2026-08-16（当前）
 
+### 打磨（日志/健壮性/UI）
+- **日志分级**：runVision debug（完整参数）+ info（耗时/输出量）+ warn（失败 code/耗时）；syncVisionConfig 改用 logger
+- **stdout 上限**：子进程输出 1MB 截断（防异常输出撑爆内存），截断标记 `+capped`
+- **识别失败降档重试**：deep 失败 → standard 重试一次（快速档不重试防重复计费）
+- **识别耗时提示**：>5s 长识别在文本头部标注耗时（进度反馈轻量形态）
+- **模型名下拉**：host 注册 `/dsh-vision/ollama-models` 路由（Ollama /api/tags，15s 缓存），GUI 模型字段可下拉（失败回退文本框）
+- **云端厂商/路由行编辑**：`JsonRowEditor` 组件——路由表（场景→引擎下拉）、云端厂商（name/model/base_url/api_key 行）可视化编辑，非法 JSON 回退文本编辑
+- **Node 冒烟纳入测试**：`test_all.py` 新增 `node` 套件（smoke-apply.mjs：6 工具 + 命名空间断言）
+
 ### 新增
 - **截图工具**：`take_screenshot`（6 号工具）——截全屏/区域保存 PNG，`identify: true`
   立即识别返回文本；vision_cli 新增 `screenshot` 子命令 + 7 个回归用例
