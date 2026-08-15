@@ -10,6 +10,7 @@ vision_client（Scan→Zoom→Guess + OCR + grounding）。
   python vision_cli.py extract <图片路径>
   python vision_cli.py locate <图片路径> <查询>
   python vision_cli.py compare <图A> <图B> [--precision fast|standard|deep]
+  python vision_cli.py screenshot [--path 输出.png] [--region x,y,w,h] [--identify [--precision P]]
 """
 import os
 import sys
@@ -42,13 +43,20 @@ DSH_STATE = os.path.expanduser("~/.dsh/vision/state")
 vision_client.STATE_FILE = DSH_STATE
 
 
-def _parse_known(argv, flags):
-    """极简参数解析：返回 (positional, options)。options 是 dict。"""
+def _parse_known(argv, flags, switches=()):
+    """极简参数解析：返回 (positional, options)。options 是 dict。
+
+    flags 是带值参数（--precision fast）；switches 是无值开关（--identify）。
+    """
     positional = []
     options = {}
     i = 0
     while i < len(argv):
         arg = argv[i]
+        if arg in switches:
+            options[arg[2:].replace("-", "_")] = True
+            i += 1
+            continue
         if arg in flags and i + 1 < len(argv):
             options[arg[2:].replace("-", "_")] = argv[i + 1]
             i += 2
@@ -107,6 +115,67 @@ def cmd_compare(argv):
     return 0
 
 
+def cmd_screenshot(argv):
+    """截屏并保存 PNG。--identify 时立即识别并输出识别文本（含路径头）。
+
+    用法:
+      screenshot [--path out.png] [--region x,y,w,h] [--identify [--precision P]]
+    默认保存到 ~/.dsh/vision/screenshots/截图_<时间戳>.png。
+    """
+    positional, opts = _parse_known(argv, {"--path", "--region", "--precision"}, switches={"--identify"})
+    if positional:
+        print("screenshot: unexpected arguments", file=sys.stderr)
+        return 1
+    path = opts.get("path") or ""
+    region = opts.get("region") or ""
+    precision = opts.get("precision") or ""
+    identify = bool(opts.get("identify"))
+
+    try:
+        from PIL import ImageGrab
+    except ImportError:
+        print("screenshot: Pillow ImageGrab unavailable (pip install Pillow)", file=sys.stderr)
+        return 1
+
+    try:
+        bbox = None
+        if region:
+            parts = [int(p.strip()) for p in region.split(",")]
+            if len(parts) != 4:
+                print("screenshot: --region must be x,y,w,h", file=sys.stderr)
+                return 1
+            x, y, w, h = parts
+            bbox = (x, y, x + w, y + h)
+        img = ImageGrab.grab(bbox=bbox, all_screens=False)
+    except Exception as e:
+        print(f"screenshot: capture failed: {e}", file=sys.stderr)
+        return 1
+
+    import time
+    if not path:
+        shots_dir = os.path.join(os.path.expanduser("~/.dsh/vision"), "screenshots")
+        os.makedirs(shots_dir, exist_ok=True)
+        path = os.path.join(shots_dir, f"截图_{time.strftime('%Y%m%d-%H%M%S')}.png")
+    try:
+        img.save(path, "PNG")
+    except Exception as e:
+        print(f"screenshot: save failed: {e}", file=sys.stderr)
+        return 1
+
+    if not identify:
+        print(path)
+        return 0
+    # 立即识别（走同一引擎，精度默认 standard / 配置档位）
+    eff_precision = precision or "standard"
+    try:
+        text = vision_client.analyze(path, eff_precision)
+    except Exception as e:
+        print(f"screenshot: identify failed: {e}", file=sys.stderr)
+        return 1
+    print(f"[截图识别结果: {path}]\n{text}")
+    return 0
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__, file=sys.stderr)
@@ -121,6 +190,8 @@ def main():
         return cmd_locate(argv)
     if command == "compare":
         return cmd_compare(argv)
+    if command == "screenshot":
+        return cmd_screenshot(argv)
     print(f"unknown command: {command}", file=sys.stderr)
     return 1
 

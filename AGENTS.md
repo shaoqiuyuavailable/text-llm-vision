@@ -6,6 +6,7 @@
 - 终端红字、报错栈、文档扫描 → `extract_text(图片路径)`
 - 图中某元素在哪里 → `locate_object(图片路径, 元素名)`
 - 前后两张图对比 → `compare_images(图A路径, 图B路径)`
+- 用户问"当前屏幕/界面是什么样"或需要看实时画面 → `take_screenshot(identify: true)`
 
 ## 强制规则
 

@@ -281,6 +281,7 @@ function rulesText(): string {
     '- 终端红字、报错栈、文档扫描 → extract_text(图片路径)',
     '- 图中某元素在哪里 → locate_object(图片路径, 元素名)',
     '- 前后两张图对比 → compare_images(图A路径, 图B路径)',
+    '- 用户问"当前屏幕/界面是什么样"或需要看实时画面 → take_screenshot(identify: true)',
   ].join('\n')
 }
 
@@ -395,6 +396,29 @@ export function apply(ctx: Context, config: Config = {}): void {
     async execute(args, exec) {
       const precision = effectivePrecision(cfg().level, cfg().precision)
       return runVision(python, cli, ['compare', args.image_a, args.image_b, '--precision', precision], cfg().timeoutMs || 120000, exec.signal)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'take_screenshot',
+    description: '截取当前屏幕（全屏或指定区域）保存为 PNG 并返回路径；identify=true 时立即用视觉引擎识别并返回识别文本。用于“看看当前屏幕/界面现在是什么样”。',
+    parameters: {
+      region: { type: 'string', description: '截取区域 x,y,w,h（像素）；省略 = 全屏' },
+      identify: { type: 'boolean', description: 'true 时截屏后立即识别；默认 false 只返回路径' },
+      precision: { type: 'string', enum: ['fast', 'standard', 'deep'], description: 'identify 时的识别精度（默认 standard）' },
+    },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    async execute(args, exec) {
+      const cliArgs = ['screenshot']
+      if (args.region) cliArgs.push('--region', args.region)
+      if (args.identify) {
+        cliArgs.push('--identify')
+        if (args.precision) cliArgs.push('--precision', args.precision)
+      }
+      return runVision(python, cli, cliArgs, cfg().timeoutMs || 120000, exec.signal)
     },
   }))
 

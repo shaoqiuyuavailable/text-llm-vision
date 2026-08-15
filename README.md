@@ -114,7 +114,7 @@ DeepSeek 官方模型是纯文本，官方视觉方案（`read_image`）需要�
 | 模型要求 | 必须视觉模型（付费） | **任何文本模型**（DeepSeek 原生可用） |
 | 成本 | 视觉 API 计费 | 本地零 / 云端可选 |
 | 隐私 | 图片必然出网 | 本地零出网 |
-| 工具面 | 1 个（read_image） | 5 个（描述/OCR/定位/对比/规则） |
+| 工具面 | 1 个（read_image） | 6 个（描述/OCR/定位/对比/截图/规则） |
 | 场景特化 | 无 | 5 引擎路由 + 混合场景 |
 | 粘贴体验 | 需模型支持，DeepSeek 下直接失败 | 无缝拦截，气泡显原图 |
 
@@ -143,7 +143,7 @@ DeepSeek 官方模型是纯文本，官方视觉方案（`read_image`）需要�
 | 文件 | 作用 |
 |------|------|
 | `cordis.patch.yml` / `cordis.yml` | 插件装载补丁（bundle 标准命名，`name: dsh-vision`） |
-| `src/index.ts` | dsh 原生插件：5 工具 + 粘贴兜底 + GUI 配置同步 |
+| `src/index.ts` | dsh 原生插件：6 工具 + 粘贴兜底 + GUI 配置同步 |
 | `python/vision_cli.py` | Python CLI：统一调 analyze/ocr/locate/compare |
 | `python/vision_client.py` | 识别引擎（自包含：5 引擎路由/混合场景/缓存） |
 | `python/config_loader.py` | 配置读取（`~/.dsh/vision/config.json`，v2 路由基线） |

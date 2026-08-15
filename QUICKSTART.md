@@ -40,6 +40,7 @@ pnpm dsh web
 - 设置 → 插件 → dsh-vision 卡片：检查档位/模型配置
 - 粘贴一张截图 → 消息气泡应显示原图缩略图 + 你的文字（识别文本隐藏）
 - 对话中让模型看本地图片：`describe_image("D:/a.png")`
+- 让模型看当前屏幕：`take_screenshot(identify: true)`
 
 ## 4. 回归测试
 

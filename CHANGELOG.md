@@ -5,6 +5,8 @@
 ## [0.1.0] - 2026-08-16（当前）
 
 ### 新增
+- **截图工具**：`take_screenshot`（6 号工具）——截全屏/区域保存 PNG，`identify: true`
+  立即识别返回文本；vision_cli 新增 `screenshot` 子命令 + 7 个回归用例
 - **自包含引擎**：vision_client/config_loader/prompts 随插件部署，脱离外部
   visual-ds 目录与 `~/.claude/vision-eyes` 依赖；visual-ds 封存为版本基线
 - **GUI 配置集成**：设置 → 插件 → dsh-vision 卡片（12 项配置，档位/模型/
@@ -15,7 +17,7 @@
 - **同图去重缓存**：进程内 LRU（sha256 → 识别文本），防重复识别/计费；不落盘
 - **一键安装脚本**：`scripts/install.py` 模块化可选项
   （check/deps/local/cloud/deploy/mount/test/all）
-- **回归测试**：`scripts/test_all.py` 全量 82 用例（CLI 分发 16 + 引擎逻辑 39 + 配置逻辑 27，mock 引擎不依赖网络/模型）
+- **回归测试**：`scripts/test_all.py` 全量 89 用例（CLI 23 + 引擎 39 + 配置 27，mock 引擎不依赖网络/模型）
 - **文档**：`docs/upstream-changes.md`（本体改动记录）、`docs/architecture.md`、
   `QUICKSTART.md`、`CHANGELOG.md`
 

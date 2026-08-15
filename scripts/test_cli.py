@@ -126,6 +126,58 @@ class CompareTest(CaptureOutput):
         self.assertEqual(rc, 1)
 
 
+class ScreenshotTest(CaptureOutput):
+    def test_basic_returns_path(self):
+        fake_img = mock.Mock()
+        fake_img.save = mock.Mock()
+        with mock.patch("PIL.ImageGrab.grab", return_value=fake_img) as grab:
+            rc = vision_cli.cmd_screenshot(["--path", "shot.png"])
+        self.assertEqual(rc, 0)
+        grab.assert_called_once_with(bbox=None, all_screens=False)
+        fake_img.save.assert_called_once()
+        self.assertEqual(self.out(), "shot.png")
+
+    def test_region_passthrough(self):
+        fake_img = mock.Mock()
+        with mock.patch("PIL.ImageGrab.grab", return_value=fake_img) as grab:
+            vision_cli.cmd_screenshot(["--path", "shot.png", "--region", "10,20,30,40"])
+        grab.assert_called_once_with(bbox=(10, 20, 40, 60), all_screens=False)
+
+    def test_identify_runs_analyze(self):
+        fake_img = mock.Mock()
+        with mock.patch("PIL.ImageGrab.grab", return_value=fake_img):
+            with mock.patch.object(vision_cli.vision_client, "analyze", return_value="识别文本") as m:
+                rc = vision_cli.cmd_screenshot(["--path", "shot.png", "--identify", "--precision", "fast"])
+        self.assertEqual(rc, 0)
+        m.assert_called_once_with("shot.png", "fast")
+        self.assertIn("截图识别结果", self.out())
+        self.assertIn("识别文本", self.out())
+
+    def test_identify_default_precision(self):
+        fake_img = mock.Mock()
+        with mock.patch("PIL.ImageGrab.grab", return_value=fake_img):
+            with mock.patch.object(vision_cli.vision_client, "analyze", return_value="ok") as m:
+                vision_cli.cmd_screenshot(["--path", "shot.png", "--identify"])
+        m.assert_called_once_with("shot.png", "standard")
+
+    def test_import_missing(self):
+        with mock.patch.dict("sys.modules", {"PIL": None}):
+            with mock.patch("builtins.__import__", side_effect=ImportError("no PIL")):
+                rc = vision_cli.cmd_screenshot(["--path", "shot.png"])
+        self.assertEqual(rc, 1)
+        self.assertIn("Pillow", self.err())
+
+    def test_invalid_region(self):
+        with mock.patch("PIL.ImageGrab.grab") as grab:
+            rc = vision_cli.cmd_screenshot(["--path", "shot.png", "--region", "1,2"])
+        self.assertEqual(rc, 1)
+        grab.assert_not_called()
+
+    def test_unexpected_args(self):
+        rc = vision_cli.cmd_screenshot(["extra.png"])
+        self.assertEqual(rc, 1)
+
+
 class MainDispatchTest(CaptureOutput):
     def test_unknown_command(self):
         with mock.patch.object(vision_cli.sys, "argv", ["vision_cli.py", "nope"]):
