@@ -259,8 +259,8 @@ def step_mount() -> int:
 # ---------- 步骤：回归测试 ----------
 
 def step_test() -> int:
-    print("\n== CLI 回归测试 ==")
-    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "test_cli.py")])
+    print("\n== 回归测试 ==")
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "test_all.py")])
     return r.returncode
 
 

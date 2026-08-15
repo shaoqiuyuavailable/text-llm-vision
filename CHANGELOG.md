@@ -15,7 +15,7 @@
 - **同图去重缓存**：进程内 LRU（sha256 → 识别文本），防重复识别/计费；不落盘
 - **一键安装脚本**：`scripts/install.py` 模块化可选项
   （check/deps/local/cloud/deploy/mount/test/all）
-- **回归测试**：`scripts/test_cli.py`（16 用例，mock 引擎）
+- **回归测试**：`scripts/test_all.py` 全量 82 用例（CLI 分发 16 + 引擎逻辑 39 + 配置逻辑 27，mock 引擎不依赖网络/模型）
 - **文档**：`docs/upstream-changes.md`（本体改动记录）、`docs/architecture.md`、
   `QUICKSTART.md`、`CHANGELOG.md`
 

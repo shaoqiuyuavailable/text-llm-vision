@@ -12,7 +12,7 @@
   1. **识别引擎**（`python/vision_client.py` + `prompts.py`）：换模型、改提示词、加场景、加引擎（如接入 rapid-table / OmniParser / UI-TARS 只需替换引擎函数体，路由表不用动）
   2. **工具面**（`src/index.ts`）：加工具、改描述、调参数，全部走 `defineTool` 标准接口
   3. **GUI 配置**（settings 命名空间）：新配置项 = schema 加字段 + 卡片加控件，模式现成
-- 开发自检：`python scripts/test_cli.py`（回归）+ `python scripts/verify_mount.py`（挂载检查）
+- 开发自检：`python scripts/test_all.py`（82 用例回归）+ `python scripts/verify_mount.py`（挂载检查）
 - 想分享你的定制版？Fork 本仓库 → 改 → PR，或发布你自己的 npm 包均可
 - 反馈/建议/问题：GitHub Issues（见仓库首页）——**本人心情好才看一眼修一下，心情不好请自行拉取二次开发，反正 MIT 都随你折腾**
 
@@ -72,7 +72,7 @@ python scripts/install.py --all      # 全流程（依赖→本地→云端→�
 | `--cloud` | 配置云端通道（**可选**：dashscope/Gemini/GLM/自定义，提升精度上限） |
 | `--deploy` | 部署识别库到 `~/.dsh/vision`（可选，插件目录已自带） |
 | `--mount` | 挂载插件到 dsh profile（`pnpm dsh plugin --profile web add`） |
-| `--test` | 跑 CLI 回归测试（16 用例） |
+| `--test` | 跑 CLI 回归测试（82 用例） |
 
 ### 手动安装
 
