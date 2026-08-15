@@ -82,13 +82,9 @@ def tool_describe(args):
     prompt = (args.get("prompt") or "").strip()
     mode = (args.get("mode") or "").strip()
     precision = _describe_precision()
-    if prompt:
-        text = vision_client.describe(path, prompt=prompt)
-    elif mode:
-        # --mode 动态温度（v2）：rigorous/identity/military/anime/open
-        text = vision_client.analyze(path, precision, mode=mode)
-    else:
-        text = vision_client.analyze(path, precision)  # 档位对齐主路径（F1）
+    # prompt（用户具体需求）→ 驱动完整管线（question 拼到 zoom/guess 末尾成回答节），
+    # 不再裸问绕过分层；fast 档无提取层 → 输出档位不足提示
+    text = vision_client.analyze(path, precision, mode=mode, question=prompt)
     return {"content": [{"type": "text", "text": text}], "isError": False}
 
 
@@ -177,7 +173,9 @@ HANDLERS = {
 # ---- MCP JSON-RPC（stdio，newline-delimited）----
 
 def _send(out, obj):
-    out.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    # 兜底清洗孤立代理字符（vision_client._sanitize 已清源头；此处防其它文字源再编码崩）
+    data = json.dumps(obj, ensure_ascii=False).encode("utf-8", "replace").decode("utf-8")
+    out.write(data + "\n")
     out.flush()
 
 
@@ -231,11 +229,15 @@ def serve(instream, outstream):
 
 
 def main():
-    # stdout 是 MCP 协议通道，必须 UTF-8
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, OSError):
-        pass
+    # MCP 协议通道必须 UTF-8：stdout 用于响应，stdin 用于接收宿主请求。
+    # Windows 默认 stdin/stdout 用本地编码（如 GBK/cp936），宿主按 UTF-8 发中文 prompt
+    # 时会被误读成乱码（GBK 解码 UTF-8 中文）甚至产生孤立代理字符，后续缓存 key
+    # 再编码必崩——两端都强制 UTF-8 + replace（乱码字节不致命，替换为 U+FFFD）。
+    for stream in (sys.stdin, sys.stdout):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
     _setup_logging()  # v1.5：引擎回退日志写 vision-proxy.log
     # 启动日志写 stderr（stdout 是协议通道，不能污染）
     try:

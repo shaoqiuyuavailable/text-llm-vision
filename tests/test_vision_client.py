@@ -403,7 +403,7 @@ def test_guess_mode_overrides_temperature(monkeypatch):
 def test_analyze_passes_mode_to_guess(monkeypatch):
     captured = {}
 
-    def fake_guess(path, context="", scene="", sub="", scan_desc="", mode="", model=""):
+    def fake_guess(path, context="", scene="", sub="", scan_desc="", mode="", model="", question=""):
         captured["mode"] = mode
         captured["model"] = model
         return "推测"
@@ -414,6 +414,154 @@ def test_analyze_passes_mode_to_guess(monkeypatch):
     out = vision_client.analyze("/tmp/x.png", "deep", mode="anime")
     assert captured["mode"] == "anime"
     assert "推测" in out
+
+
+# ---- 用户需求回答节（question 贯通：zoom/guess 末尾拼接、fast 档位提示、逐字引擎不掺）----
+
+
+def test_zoom_appends_answer_section_with_question(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature, model=""):
+        captured["prompt"] = prompt
+        return "OK"
+
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    vision_client.zoom("/tmp/x.png", scene="vehicle", question="这车什么型号")
+    assert "用户关注点：这车什么型号" in captured["prompt"]
+    assert "【针对用户需求】" in captured["prompt"]
+    assert "不要编造" in captured["prompt"]
+
+
+def test_zoom_no_question_no_answer_section(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature, model=""):
+        captured["prompt"] = prompt
+        return "OK"
+
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    vision_client.zoom("/tmp/x.png", scene="vehicle")
+    assert "【针对用户需求】" not in captured["prompt"]
+
+
+def test_guess_appends_answer_section_with_question(monkeypatch):
+    captured = {}
+
+    def fake_post(b64, prompt, temperature, model=""):
+        captured["prompt"] = prompt
+        return "OK"
+
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    vision_client.guess("/tmp/x.png", context="事实", scene="vehicle", question="这是哪款车")
+    assert "用户关注点：这是哪款车" in captured["prompt"]
+    assert "【针对用户需求】" in captured["prompt"]
+
+
+def test_analyze_fast_with_question_hints_level(monkeypatch):
+    # fast 无提取层 → 不拼回答节，只提示档位不足（不硬塞 scan 污染路由）
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("描述", "vehicle", "car"))
+    out = vision_client.analyze("/tmp/x.png", "fast", question="这车什么型号")
+    assert "档位" in out
+    assert "【针对用户需求】" not in out
+
+
+def test_analyze_fast_without_question_no_hint(monkeypatch):
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("描述", "vehicle", "car"))
+    out = vision_client.analyze("/tmp/x.png", "fast")
+    assert "档位" not in out
+
+
+def test_analyze_standard_passes_question_to_zoom(monkeypatch):
+    captured = {}
+
+    def fake_zoom(path, scene="generic", sub="", scan_desc="", model="", question=""):
+        captured["question"] = question
+        return "事实"
+
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("描述", "vehicle", "car"))
+    monkeypatch.setattr(vision_client, "zoom", fake_zoom)
+    vision_client.analyze("/tmp/x.png", "standard", question="这车什么型号")
+    assert captured["question"] == "这车什么型号"
+
+
+def test_analyze_deep_passes_question_to_guess(monkeypatch):
+    captured = {}
+
+    def fake_guess(path, context="", scene="", sub="", scan_desc="", mode="", model="", question=""):
+        captured["question"] = question
+        return "推测"
+
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _branch_cfg(("vehicle",)))
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("描述", "vehicle", "car"))
+    monkeypatch.setattr(vision_client, "zoom", lambda *a, **k: "事实")
+    monkeypatch.setattr(vision_client, "guess", fake_guess)
+    monkeypatch.setattr(vision_client, "spatial", lambda *a, **k: "")
+    vision_client.analyze("/tmp/x.png", "deep", question="这车什么型号")
+    assert captured["question"] == "这车什么型号"
+
+
+def test_analyze_deep_zoom_stays_pure(monkeypatch):
+    # deep 档回答节只落 guess：zoom 不收 question（标准事实纯净，guess 的依据不被污染）
+    zoom_captured, guess_captured = {}, {}
+
+    def fake_zoom(path, scene="generic", sub="", scan_desc="", model="", question=""):
+        zoom_captured["question"] = question
+        return "事实"
+
+    def fake_guess(path, context="", scene="", sub="", scan_desc="", mode="", model="", question=""):
+        guess_captured["question"] = question
+        return "推测"
+
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _branch_cfg(("vehicle",)))
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("描述", "vehicle", "car"))
+    monkeypatch.setattr(vision_client, "zoom", fake_zoom)
+    monkeypatch.setattr(vision_client, "guess", fake_guess)
+    monkeypatch.setattr(vision_client, "spatial", lambda *a, **k: "")
+    vision_client.analyze("/tmp/x.png", "deep", question="这车什么型号")
+    assert zoom_captured["question"] == ""   # deep 档 zoom 纯净
+    assert guess_captured["question"] == "这车什么型号"  # 回答节只在 guess
+
+
+def test_analyze_code_engine_does_not_append_question(monkeypatch):
+    # 逐字引擎（code）不掺用户提问——转写必须纯净，回答节不进 extract_code 提示词
+    captured = {}
+
+    def fake_post(b64, prompt, temperature, model=""):
+        captured["prompt"] = prompt
+        return "void foo() { return 1; }"
+
+    import config_loader
+    monkeypatch.setattr(config_loader, "get", lambda: _engine_cfg())
+    monkeypatch.setattr(vision_client, "scan", lambda p: ("代码", "document", "code"))
+    monkeypatch.setattr(vision_client, "_post_b64", fake_post)
+    monkeypatch.setattr(vision_client, "_to_b64", lambda p: "B64")
+    out = vision_client.analyze("/tmp/x.png", "standard", question="循环条件是什么")
+    assert "void foo()" in out
+    assert "【针对用户需求】" not in captured["prompt"]
+
+
+def test_sanitize_strips_lone_surrogates():
+    # 孤立代理字符（Ollama 无效 UTF-8 字节 → httpx surrogateescape）必须清洗，
+    # 否则 json.dumps / HTTP 响应再编码崩（UnicodeEncodeError）
+    assert vision_client._sanitize("正常文本") == "正常文本"
+    assert vision_client._sanitize("abc\udca1def") == "abc?def"  # 乱码字节 → '?'
+    assert vision_client._sanitize("") == ""
+
+
+def test_cache_key_encode_survives_surrogate_prompt():
+    # 回归：GBK 误读遗留的孤立代理 prompt 不该让缓存 key 生成崩（encode 用 replace）
+    import hashlib
+    model, b64, temp = "qwen", "B64", "0.5"
+    prompt = "用户关注点：椋炶\udca1屽憳"  # 模拟被 GBK 误读的乱码中文 prompt
+    key = hashlib.sha256((model + "|" + b64 + "|" + prompt + "|" + temp)
+                         .encode("utf-8", "replace")).hexdigest()
+    assert len(key) == 64
 
 
 def test_analyze_unknown_scene_appends_conclusion(monkeypatch):

@@ -103,6 +103,15 @@ def _cloud_of(name: str) -> dict | None:
     return None
 
 
+def _sanitize(s: str) -> str:
+    """清洗文本中的孤立代理字符：Ollama 等返回无效 UTF-8 字节时 httpx 以 surrogateescape
+    解码出孤立代理（\\udxxx），后续 json.dumps / HTTP 响应再编码必崩（UnicodeEncodeError）。
+    统一替换掉（乱码字节→'?'），不让它传播到 MCP/proxy/CLI 任何输出路径。"""
+    if not s:
+        return s
+    return s.encode("utf-8", "replace").decode("utf-8")
+
+
 def _post_cloud(b64: str, prompt: str, temperature: float, provider: str = "") -> str:
     """云端通道：按当前激活平台（provider 空）或指定厂商（v1.5 模型级）发 OpenAI 兼容 /chat/completions。"""
     c = _active_cloud()
@@ -131,7 +140,7 @@ def _post_cloud(b64: str, prompt: str, temperature: float, provider: str = "") -
     r = httpx.post(url, json=payload, headers=headers, timeout=120, trust_env=False)
     r.raise_for_status()
     data = r.json()
-    return data["choices"][0]["message"]["content"].strip()
+    return _sanitize(data["choices"][0]["message"]["content"].strip())
 
 
 def _post_b64(b64: str, prompt: str, temperature: float, model: str = "") -> str:
@@ -149,7 +158,9 @@ def _post_b64(b64: str, prompt: str, temperature: float, model: str = "") -> str
     eff_model = model or ((ac.get("model") if (ac and use_cloud) else "") or o["model"])
     if use_cache:
         # 缓存 key 含 model + temperature：换模型/改温度后不命中旧缓存（防拿过期结果）
-        key = hashlib.sha256((eff_model + "|" + b64 + "|" + prompt + "|" + str(temperature)).encode()).hexdigest()
+        # encode 用 replace 防任意输入（如 GBK 乱码遗留的孤立代理）在 key 生成处崩
+        key = hashlib.sha256((eff_model + "|" + b64 + "|" + prompt + "|" + str(temperature))
+                             .encode("utf-8", "replace")).hexdigest()
         with _cache_lock:
             if key in _cache:
                 return _cache[key]
@@ -165,7 +176,7 @@ def _post_b64(b64: str, prompt: str, temperature: float, model: str = "") -> str
                                                                         "top_p": o["top_p"]}},
                            timeout=120, trust_env=False)
         r.raise_for_status()
-        text = r.json()["response"].strip()
+        text = _sanitize(r.json()["response"].strip())
     if use_cache:
         with _cache_lock:
             _cache[key] = text
@@ -527,37 +538,45 @@ def _prompt_call(path_or_b64: str, prompt_key: str, scene: str, sub: str, scan_d
     return _post_b64(_to_b64(path_or_b64), prompt, e["temperature"], model=model)
 
 
-def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
-    """OCR 引擎（RapidOCR）：只提取文字。提取不足返回空串 → 调用方回退 vlm。"""
+def _engine_ocr(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "",
+                question: str = "") -> str:
+    """OCR 引擎（RapidOCR）：只提取文字。提取不足返回空串 → 调用方回退 vlm。
+    逐字引擎不掺用户提问（question 忽略）——转写必须纯净，语义问题由文本 LLM 答。"""
     text = ocr(path_or_b64)
     if len(text) >= 20:
         return f"[OCR 提取的文字（自动路由，未走视觉模型）]\n{text}"
     return ""
 
 
-def _engine_vlm(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
-    """VLM 引擎：走 zoom 按类提示词。model 非空时用指定模型（本地 ollama / 云端厂商）。"""
-    return zoom(path_or_b64, scene, sub=sub, scan_desc=scan_desc, model=model)
+def _engine_vlm(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "",
+                question: str = "") -> str:
+    """VLM 引擎：走 zoom 按类提示词，question 透传（拼回答节）。
+    model 非空时用指定模型（本地 ollama / 云端厂商）。"""
+    return zoom(path_or_b64, scene, sub=sub, scan_desc=scan_desc, model=model, question=question)
 
 
-def _engine_table(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
-    """表格引擎：完整提取表格 → Markdown。
+def _engine_table(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "",
+                  question: str = "") -> str:
+    """表格引擎：完整提取表格 → Markdown。逐字引擎，question 忽略（转写纯净）。
 
     当前实现：VLM + 表格提取提示词（extract_table）。接入专业引擎（rapid-table /
     PP-StructureV3）时替换本函数体，_ENGINES 与路由不用动；模型由用户按需配置（engine:model）。"""
     return _prompt_call(path_or_b64, "extract_table", scene, sub, scan_desc, model=model)
 
 
-def _engine_gui(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
-    """GUI 引擎：枚举界面可交互元素（VLM + extract_gui 提示词）。
+def _engine_gui(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "",
+                question: str = "") -> str:
+    """GUI 引擎：枚举界面可交互元素（VLM + extract_gui 提示词）。结构化枚举，question 忽略。
 
     接入专业引擎（OmniParser / UI-TARS）时替换本函数体，_ENGINES 与路由不用动；
     模型由用户按需配置（engine:model）。"""
     return _prompt_call(path_or_b64, "extract_gui", scene, sub, scan_desc, model=model)
 
 
-def _engine_code(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "") -> str:
+def _engine_code(path_or_b64: str, scene: str, sub: str, scan_desc: str, model: str = "",
+                 question: str = "") -> str:
     """代码引擎：逐字符转写代码原文（VLM + extract_code 提示词，温度 0.1）。
+    逐字引擎，question 忽略（转写必须逐字纯净）。
 
     通用 OCR 对代码保真差（数字1↔字母l、空格丢失、`);`被误读），代码必须逐字；
     VLM 懂代码语义、按提示词严格保真，好于通用 OCR。模型由用户按需配置。"""
@@ -603,27 +622,29 @@ def _build_branches(main: str, sub: str, focus: list[tuple[str, str]]) -> list[t
 
 
 def _run_engine(engine: str, path_or_b64: str, scene: str, sub: str, scan_desc: str,
-                model: str = "") -> str:
+                model: str = "", question: str = "") -> str:
     """调引擎：未注册 / 异常返回空串（调用方回退 vlm，不报错）。回退记 warning 日志（兜底 + 可诊断）。"""
     fn = _ENGINES.get(engine)
     if fn is None:
         log.warning("router: 引擎 %r 未注册（scene=%s.%s），回退 vlm", engine, scene, sub)
         return ""
     try:
-        return fn(path_or_b64, scene, sub, scan_desc, model=model)
+        return fn(path_or_b64, scene, sub, scan_desc, model=model, question=question)
     except Exception as e:
         log.warning("router: 引擎 %s 异常 %s: %s（scene=%s.%s model=%s），回退 vlm",
                     engine, type(e).__name__, e, scene, sub, model or "-")
         return ""
 
 
-def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
+def analyze(path_or_b64: str, precision: str = "", mode: str = "", question: str = "") -> str:
     """按精度档位识别。统一入口，供 proxy / MCP 使用。
-    - fast:     1 次 describe（单句描述）——快
-    - standard: scan + 主类引擎 + 聚焦点引擎（混合图各分支独立提取）
-    - deep:     standard + 实体分支各自 guess（不合并）+ 空间结构
+    - fast:     1 次 describe（单句描述）——快；带提问时不给回答节，仅提示档位不足
+    - standard: scan + 主类引擎 + 聚焦点引擎（混合图各分支独立提取）；回答节落在 zoom
+    - deep:     standard + 实体分支各自 guess（不合并）+ 空间结构；回答节落在 guess
     precision 缺省时读 config.prompts.default（或 config ollama.precision）。
     mode 走 config modes 表动态覆盖 guess 温度（v2 --mode）。
+    question（用户具体需求）非空时拼到 zoom/guess 提示词末尾；逐字引擎（ocr/code/table/gui）
+    不掺提问（转写纯净），语义问题由文本 LLM 答。
     """
     cfg = config_loader.get()
     if not precision:
@@ -633,7 +654,12 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
         # fast 也走 scan：1 次调用即含描述+类别（scan 提示词自带描述要求），供 scene 推理
         parsed = scan(path_or_b64)
         desc, scene = parsed[0], parsed[1]
-        return f"【初步判断】{desc}\n【场景】{scene}"
+        base = f"【初步判断】{desc}\n【场景】{scene}"
+        if question:
+            # fast 无提取层可挂回答节；硬塞 scan 会污染路由 → 只提示档位不足
+            base += ("\n【提示】当前为 fast 档（仅初步判断），未针对你的提问定向回答；"
+                     "如需定向回答请升级档位（/vision 2 或 3）。")
+        return base
     # standard / deep：先 scan 判场景 + 聚焦点，再按路由表选引擎（视觉路由器 v1.5）
     parsed = scan(path_or_b64)
     desc, scene, sub = parsed[0], parsed[1], parsed[2]
@@ -642,17 +668,20 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
         focus = []  # 内容类场景（diagram 等）的聚焦点误报（object）→ 丢弃，不跑多余分支
     # 分析分支：主类 + 聚焦点中与主类不同的场景（去重 + _MAX_BRANCHES 封顶）。
     # 混合图（如人+飞机）→ 两个分支各自路由引擎、各提各的，互不干扰；普通图自动 1 分支。
+    # 回答节落点：standard → zoom（引擎层）；deep → 只 guess 拼（zoom 保持纯净，
+    # 标准事实是 guess 的依据，回答节渗入会污染它）。
+    zoom_question = question if precision != "deep" else ""
     branches = _build_branches(scene, sub, focus)
     branch_out = []
     ocr_used = False
     for label, m, s in branches:
         eng, mdl = _parse_route_value(_route_engine(m, s))
-        facts = _run_engine(eng, path_or_b64, m, s, desc, model=mdl)
+        facts = _run_engine(eng, path_or_b64, m, s, desc, model=mdl, question=zoom_question)
         if facts and eng == "ocr":
             ocr_used = True
         if not facts:
             mdl = ""  # 指定模型失败/缺失 → 兜底用全局模型
-            facts = _run_engine("vlm", path_or_b64, m, s, desc) or ""
+            facts = _run_engine("vlm", path_or_b64, m, s, desc, question=zoom_question) or ""
         if not facts and label == "主":
             facts = "[识别失败（引擎异常），已回退]"  # 主分支失败必须有占位；聚焦点分支空则丢弃
         if facts:
@@ -669,7 +698,8 @@ def analyze(path_or_b64: str, precision: str = "", mode: str = "") -> str:
     guess_parts = []
     for label, m, s, facts, mdl in branch_out:
         if m in _GUESS_SCENES and facts.strip():
-            g = guess(path_or_b64, context=facts, scene=m, sub=s, scan_desc=desc, mode=mode, model=mdl)
+            g = guess(path_or_b64, context=facts, scene=m, sub=s, scan_desc=desc,
+                      mode=mode, model=mdl, question=question)
             if g:
                 head = "【推测】" if label == "主" else f"【推测·{label}】"
                 guess_parts.append(f"{head}\n{g}")
@@ -703,11 +733,12 @@ def scan(path_or_b64: str) -> tuple[str, str, str, list[tuple[str, str]]]:
 
 
 def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str = "",
-         model: str = "") -> str:
+         model: str = "", question: str = "") -> str:
     """第2次：按大类选 zoom 清单，小类作为上下文注入。
 
     scene 能否 zoom 取决于有没有 zoom_<scene> 提示词；缺失（如 config 新增类漏配）回退 generic，
-    避免发「只有 header、正文空」的请求。model 非空时用指定模型（v1.5 场景模型）。"""
+    避免发「只有 header、正文空」的请求。model 非空时用指定模型（v1.5 场景模型）。
+    question 非空时在提示词末尾拼接「用户关注点 + 回答节」——标准提取原样，提问单独成节。"""
     if f"zoom_{scene}" not in config_loader.get()["prompts"]:
         scene = "generic"
     e = _entry(f"zoom_{scene}")
@@ -718,15 +749,20 @@ def zoom(path_or_b64: str, scene: str = "generic", sub: str = "", scan_desc: str
     if scan_desc.strip():
         header += f"\n第1次扫描的初步判断：\n{scan_desc.strip()}"
     prompt = f"{header}\n\n请基于以上信息，按以下清单逐项提取更精确的事实：\n{e['text']}"
+    if question:
+        prompt += (f"\n\n用户关注点：{question}\n"
+                   f"最后单独输出【针对用户需求】部分回答该问题；"
+                   f"图中不可见或无法确认的，明确说明，不要编造。")
     return _post_b64(_to_b64(path_or_b64), prompt, e["temperature"], model=model)
 
 
 def guess(path_or_b64: str, context: str = "", scene: str = "", sub: str = "",
-          scan_desc: str = "", mode: str = "", model: str = "") -> str:
+          scan_desc: str = "", mode: str = "", model: str = "", question: str = "") -> str:
     """第3次：基于 scan 描述 + zoom 事实 + 场景，大胆推测。
 
     mode 走 config modes 表动态覆盖 guess 温度（--mode / describe_image mode）；缺省用提示词温度。
-    model 非空时用指定模型（v1.5 场景模型）。"""
+    model 非空时用指定模型（v1.5 场景模型）。
+    question 非空时在提示词末尾拼接「用户关注点 + 回答节」（deep 档回答节落点）。"""
     e = _entry("guess")
     temp = _mode_temperature(mode)
     if temp is None:
@@ -740,4 +776,8 @@ def guess(path_or_b64: str, context: str = "", scene: str = "", sub: str = "",
         prompt += f"\n\n第1次扫描的初步判断：\n{scan_desc.strip()}"
     if context.strip():
         prompt += f"\n\n已提取的事实特征：\n{context.strip()}"
+    if question:
+        prompt += (f"\n\n用户关注点：{question}\n"
+                   f"最后单独输出【针对用户需求】部分回答该问题；"
+                   f"图中不可见或无法确认的，明确说明，不要编造。")
     return _dedupe_guess(_post_b64(_to_b64(path_or_b64), prompt, temp, model=model))

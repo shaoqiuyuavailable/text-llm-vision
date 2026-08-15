@@ -39,8 +39,9 @@ def test_describe_image_calls_analyze(monkeypatch, tmp_path):
     img.write_bytes(b"x")
     calls = {}
 
-    def fake_analyze(p, precision=""):
+    def fake_analyze(p, precision="", mode="", question=""):
         calls["precision"] = precision
+        calls["question"] = question
         return f"识别:{p}"
 
     monkeypatch.setattr(mcp_server.vision_client, "analyze", fake_analyze)
@@ -49,6 +50,7 @@ def test_describe_image_calls_analyze(monkeypatch, tmp_path):
                "params": {"name": "describe_image", "arguments": {"image": str(img)}}})
     assert r["result"]["content"][0]["text"] == f"识别:{img}"
     assert calls["precision"] == "deep"
+    assert calls["question"] == ""  # 无提问 → question 空
     assert r["result"]["isError"] is False
 
 
@@ -57,33 +59,38 @@ def test_describe_image_mode_routes_to_analyze(monkeypatch, tmp_path):
     img.write_bytes(b"x")
     calls = {}
 
-    def fake_analyze(p, precision="", mode=""):
+    def fake_analyze(p, precision="", mode="", question=""):
         calls["mode"] = mode
-        return f"MODE:{mode}"
+        calls["question"] = question
+        return f"MODE:{mode}|Q:{question}"
 
     monkeypatch.setattr(mcp_server.vision_client, "analyze", fake_analyze)
     r = _call({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                "params": {"name": "describe_image", "arguments": {"image": str(img), "mode": "anime"}}})
     assert calls["mode"] == "anime"
-    assert r["result"]["content"][0]["text"] == "MODE:anime"
+    assert calls["question"] == ""
+    assert r["result"]["content"][0]["text"] == "MODE:anime|Q:"
 
 
-def test_describe_image_prompt_routes_to_describe(monkeypatch, tmp_path):
+def test_describe_image_prompt_routes_to_analyze_with_question(monkeypatch, tmp_path):
+    # 用户具体需求（prompt）→ 驱动完整管线（question 传 analyze），不再裸问绕过分层
     img = tmp_path / "x.png"
     img.write_bytes(b"x")
     calls = {}
 
-    def fake_describe(p, prompt=""):
-        calls["prompt"] = prompt
-        return f"DESCRIBE:{prompt}"
+    def fake_analyze(p, precision="", mode="", question=""):
+        calls["question"] = question
+        calls["mode"] = mode
+        return f"ANALYZE:{question}"
 
-    monkeypatch.setattr(mcp_server.vision_client, "analyze", lambda p: "ANALYZE")
-    monkeypatch.setattr(mcp_server.vision_client, "describe", fake_describe)
+    monkeypatch.setattr(mcp_server.vision_client, "analyze", fake_analyze)
+    monkeypatch.setattr(mcp_server.vision_client, "describe", lambda p, prompt="": "不应走 describe")
     r = _call({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                "params": {"name": "describe_image", "arguments": {"image": str(img), "prompt": "数数几个人"}}})
-    assert r["result"]["content"][0]["text"] == "DESCRIBE:数数几个人"
+    assert r["result"]["content"][0]["text"] == "ANALYZE:数数几个人"
     assert r["result"]["isError"] is False
-    assert calls["prompt"] == "数数几个人"
+    assert calls["question"] == "数数几个人"
+    assert calls["mode"] == ""
 
 
 def test_describe_image_missing_or_bad_path(tmp_path):
