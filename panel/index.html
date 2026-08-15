@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>dsh-vision 控制面板</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2f3a;
+    --text: #e6e6e6;
+    --muted: #9aa4b2;
+    --accent: #4f8cff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .ok { background: var(--ok); }
+  .bad { background: var(--err); }
+  main { padding: 24px; max-width: 960px; margin: 0 auto; display: grid; gap: 16px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 8px; }
+  .label { color: var(--muted); min-width: 120px; }
+  .value { font-weight: 600; }
+  button, select, input {
+    background: #1e222b;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  input[type="number"], input[type="text"] { width: 180px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .ok-text { color: var(--ok); }
+  .err-text { color: var(--err); }
+  .warn-text { color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>👁 dsh-vision 控制面板</h1>
+  <div><span id="proxyDot" class="status-dot bad"></span><span id="proxyText">连接中…</span></div>
+</header>
+<main>
+  <div class="grid">
+    <section class="card">
+      <h2>档位 / 后端</h2>
+      <div class="row">
+        <span class="label">视觉档位</span>
+        <select id="level"></select>
+        <button onclick="setLevel()">应用</button>
+      </div>
+      <div class="row">
+        <span class="label">后端</span>
+        <select id="backend">
+          <option value="local">local（Ollama）</option>
+          <option value="cloud">cloud（云端）</option>
+        </select>
+        <button onclick="setBackend()">切换</button>
+      </div>
+      <div class="row">
+        <span class="label">端口</span>
+        <input id="port" type="number" min="1" max="65535" />
+        <button onclick="setPort()">保存</button>
+      </div>
+      <div class="row"><span class="label">当前状态</span><span id="backendDesc" class="value">-</span></div>
+    </section>
+
+    <section class="card">
+      <h2>Ollama / 模型</h2>
+      <div class="row"><span class="label">Ollama 服务</span><span id="ollamaService" class="value">-</span></div>
+      <div class="row"><span class="label">模型</span><span id="ollamaModel" class="value">-</span></div>
+      <div class="row"><span class="label">温度</span><input id="temperature" type="number" step="0.1" min="0" max="2" /></div>
+      <div class="row"><span class="label">top_p</span><input id="topP" type="number" step="0.05" min="0" max="1" /></div>
+      <div class="row"><span class="label">grounding</span><select id="grounding"><option value="true">开</option><option value="false">关</option></select></div>
+      <div class="row"><button onclick="saveOllama()">保存 Ollama 配置</button></div>
+    </section>
+
+    <section class="card">
+      <h2>上游 / 云端</h2>
+      <div class="row"><span class="label">Anthropic 上游</span><input id="upstream" type="text" /></div>
+      <div class="row"><span class="label">OpenAI 上游</span><input id="upstreamOpenai" type="text" /></div>
+      <div class="row"><button onclick="saveUpstream()">保存上游</button></div>
+      <div class="row"><span class="label">云端厂商</span><span id="cloudList" class="muted">-</span></div>
+    </section>
+
+    <section class="card">
+      <h2>挂载检查</h2>
+      <div id="mountInfo" class="muted">-</div>
+    </section>
+  </div>
+</main>
+
+<script>
+const LEVEL_NAMES = { 0: 'off', 1: 'fast', 2: 'standard', 3: 'deep' };
+let statusCache = null;
+
+async function api(path, method = 'GET', body) {
+  const resp = await fetch(path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await resp.json().catch(() => ({}));
+  return { ok: resp.ok, status: resp.status, data };
+}
+
+function setProxyState(ok, text) {
+  const dot = document.getElementById('proxyDot');
+  const label = document.getElementById('proxyText');
+  dot.className = 'status-dot ' + (ok ? 'ok' : 'bad');
+  label.textContent = text;
+}
+
+async function refresh() {
+  const res = await api('/api/status');
+  if (!res.ok) {
+    setProxyState(false, '无法连接控制服务');
+    return;
+  }
+  setProxyState(true, '已连接');
+  const d = res.data;
+  statusCache = d;
+
+  const levelSelect = document.getElementById('level');
+  levelSelect.innerHTML = '';
+  for (const [lv, name] of Object.entries(LEVEL_NAMES)) {
+    const opt = document.createElement('option');
+    opt.value = lv;
+    opt.textContent = `${name} (${lv})`;
+    if (Number(lv) === d.level) opt.selected = true;
+    levelSelect.appendChild(opt);
+  }
+
+  document.getElementById('backend').value = d.backend || 'local';
+  document.getElementById('port').value = d.port || 8787;
+  document.getElementById('backendDesc').textContent =
+    `${d.backend || 'local'}${d.active_provider ? ' (' + d.active_provider + ')' : ''}`;
+
+  const ollama = d.ollama || {};
+  document.getElementById('ollamaService').textContent =
+    d.ollama_service && d.ollama_service.running
+      ? `运行中 ${d.ollama_service.model || ''}`
+      : '未运行';
+  document.getElementById('ollamaModel').textContent = ollama.model || '-';
+  document.getElementById('temperature').value = ollama.temperature ?? '';
+  document.getElementById('topP').value = ollama.top_p ?? '';
+  document.getElementById('grounding').value = String(!!ollama.grounding);
+  document.getElementById('upstream').value = d.upstream || '';
+  document.getElementById('upstreamOpenai').value = d.upstream_openai || '';
+
+  const cloud = (d.cloud || []).map(c => `${c.name}${c.has_key ? ' ✓' : ' ✗'}`).join('，') || '(未配置)';
+  document.getElementById('cloudList').textContent = cloud;
+
+  const mount = await api('/api/mount');
+  if (mount.ok) {
+    const m = mount.data;
+    const items = [
+      ['cordis.yml', m.cordis_yml],
+      ['src/index.ts', m.plugin_ts],
+      ['vision_cli.py', m.vision_cli],
+      ['config.json', m.config_exists],
+      ['visual-ds 可导入', m.visual_ds_importable],
+    ];
+    document.getElementById('mountInfo').innerHTML = items
+      .map(([name, ok]) => `<div>${ok ? '✅' : '❌'} ${name}${name === 'config.json' ? ` <span class="muted">(${m.config_path})</span>` : ''}</div>`)
+      .join('');
+  } else {
+    document.getElementById('mountInfo').textContent = '挂载检查失败';
+  }
+}
+
+async function setLevel() {
+  const level = Number(document.getElementById('level').value);
+  const res = await api('/api/level', 'POST', { level });
+  if (res.ok) refresh(); else alert('设置失败: ' + ((res.data && res.data.error) || res.status));
+}
+
+async function setBackend() {
+  const kind = document.getElementById('backend').value;
+  const res = await api('/api/backend', 'POST', { kind });
+  if (res.ok) refresh(); else alert('切换失败: ' + ((res.data && res.data.error) || res.status));
+}
+
+async function setPort() {
+  const port = Number(document.getElementById('port').value);
+  const res = await api('/api/backend', 'POST', { kind: 'local', port });
+  if (res.ok) refresh(); else alert('保存端口失败: ' + ((res.data && res.data.error) || res.status));
+}
+
+async function saveOllama() {
+  const temperature = Number(document.getElementById('temperature').value);
+  const top_p = Number(document.getElementById('topP').value);
+  const grounding = document.getElementById('grounding').value === 'true';
+  const res = await api('/api/config', 'POST', { ollama: { temperature, top_p, grounding } });
+  if (res.ok) refresh(); else alert('保存 Ollama 配置失败: ' + ((res.data && res.data.error) || res.status));
+}
+
+async function saveUpstream() {
+  const upstream = document.getElementById('upstream').value.trim();
+  const upstream_openai = document.getElementById('upstreamOpenai').value.trim();
+  const res = await api('/api/config', 'POST', { upstream, upstream_openai });
+  if (res.ok) refresh(); else alert('保存上游失败: ' + ((res.data && res.data.error) || res.status));
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

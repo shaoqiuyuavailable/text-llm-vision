@@ -1,0 +1,23 @@
+{
+  "name": "dsh-vision",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "External vision plugin for DeepSeek Harness (dsh): local image understanding via visual-ds engine",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaoqiuyuavailable/text-llm-vision.git"
+  },
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-agent": "workspace:^"
+  }
+}
