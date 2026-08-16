@@ -21,20 +21,12 @@
 
 ## ⚠️ 注意事项（必读）
 
-### 对本地源码的更改细节（升级 dsh 后必须重新核对）
+### 本体改动：已废弃，零改动（2026-08-16 起）
 
-本插件需要对 dsh 本体源码做 **4 处改动**才能完整工作。**完整记录见 [`docs/upstream-changes.md`](docs/upstream-changes.md)**（含行号、改动前后代码、升级核对方法），摘要：
+**本插件不再需要修改 dsh 本体源码**——聊天气泡方案已切换为 **vision-router 式**（图片原样保留在会话日志 → GUI 天然显示原图；识别文本只在模型输入层改写），原先的 4 处本体改动（网关放行 / 设置白名单 / MessageItem / 配置卡片）**已全部回退，不再重新应用**。
 
-| # | 文件 | 改动 | 作用 |
-|---|------|------|------|
-| 1 | `packages/llm/llm-deepseek/src/adapter.ts` | `inputModalities` 两处 `['text']` → `['text','image']` | **最关键**：网关放行图片进入消息流，插件兜底才有机会执行 |
-| 2 | `packages/host/apiproxy/src/api-proxy.ts` | `WEB_SETTINGS_NAMESPACES` 加 `'dsh-vision'` | GUI 卡片可读写插件配置 |
-| 3 | `packages/client/ui-conversation/.../MessageItem.tsx` | `contentParts` 跳过 `dshVision` 块 + 提升 `dshAttachment` 为原图 | 气泡不显示识别文本、显示原图 |
-| 4 | `packages/client/ui-settings-plugins/` | 新增 VisionCard + controller + locales | GUI 配置卡片 |
-
-> **安全网**：改动 1 只是"声明层放行"——图片真正到达 API 前仍被 serializer 的 `UNSUPPORTED_CONTENT` 拒绝（插件未挂载时 fail loud，不静默）。改动 3/4 是 UI 层，不重建 bundle 只影响显示。
->
-> **升级流程**：`grep` 核对 4 处 → 重建 GUI（`pnpm --filter ... run bundle` + `pnpm --filter @deepseek-ai/dsh-web-frontend run build`）→ 重启 dsh。详见 upstream-changes.md。
+> 历史记录见 [`docs/upstream-changes.md`](docs/upstream-changes.md)（归档性质，仅作回溯）。
+> 本插件的识别引擎与配置已并入 [dsh-vision-router](https://github.com/ysr666/dsh-vision-router)（本地 Ollama 后端 / 即时翻译 / 结构化识别 / 桌面截屏），后续维护随 router 走。
 
 ### 环境依赖
 
@@ -44,7 +36,7 @@
 | pip 包（httpx / Pillow） | ✅ 必需 | `python scripts/install.py --deps` |
 | Ollama + 视觉模型（qwen2.5vl） | 本地必需 | 云端配置后可省；`ollama pull qwen2.5vl` |
 | 云端 API key | 可选 | 走 `<NAME>_API_KEY` 环境变量或 config，提升精度上限 |
-| dsh 本体 4 处改动 | ✅ 必需 | 见上表，升级后需重打 |
+| dsh 本体改动 | ❌ 不需要 | 已废弃（见上） |
 
 > **自包含**：识别引擎（vision_client/config_loader/prompts）随插件 `python/` 部署，**不依赖**外部 visual-ds 目录或 `~/.claude/vision-eyes`。
 
@@ -57,8 +49,7 @@
 DeepSeek 官方模型是纯文本，官方视觉方案（`read_image`）需要换支持 image 的模型。本插件**不改模型、不改 API**——通过 `agent/pre-step` 钩子在消息进入模型前拦截图片：
 
 ```
-粘贴/上传图片 → 网关放行（本体改动 1）→ 消息入流
-  → 插件钩子拦截 → 本地/云端识别 → 替换为文本块
+粘贴/上传图片 → 插件钩子拦截 → 本地/云端识别 → 替换为文本块
   → DeepSeek 模型只收到文字（图片字节永不进 API）
 ```
 
@@ -155,7 +146,7 @@ DeepSeek 官方模型是纯文本，官方视觉方案（`read_image`）需要�
 | `scripts/verify_mount.py` | 静态挂载检查 |
 | `scripts/test_all.py` | 全量回归（89 用例 + Node 冒烟） |
 | `scripts/smoke-apply.mjs` | Node 侧冒烟（6 工具 + 命名空间断言） |
-| `docs/upstream-changes.md` | **本体源码改动记录（升级必读）** |
+| `docs/upstream-changes.md` | **本体改动历史归档（已废弃，零本体改动）** |
 | `docs/architecture.md` | 架构设计 |
 | `AGENTS.md` | 会话软规则模板 + GUI 配置指引 |
 
@@ -170,7 +161,7 @@ pnpm dsh web                      # 重启生效
 ```
 
 - 更细步骤见 [QUICKSTART.md](QUICKSTART.md)
-- 升级 dsh 后：按 [docs/upstream-changes.md](docs/upstream-changes.md) 重新核对本体改动
+- 本体改动已废弃（零改动），[docs/upstream-changes.md](docs/upstream-changes.md) 仅作历史归档
 - 版本演进见 [CHANGELOG.md](CHANGELOG.md)
 
 ## 🛠️ 自定义
