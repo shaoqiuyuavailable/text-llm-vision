@@ -5,6 +5,14 @@
 
 > 状态：dsh 版本 **0.1.0-rc.5**（2026-08-16 验证）。改动位置以行号为参考，升级后行号可能漂移，按函数名/特征字符串定位。
 
+> **2026-08-16 晚：本体改动已全部回退**（A 方案：恢复发送前图片拦截，`D:\deepseek-harness` 工作区 git 干净，仅剩 `plugins/`、`.dsh-browser/` 未跟踪）。
+> 回退原因：切换测试 vision-router 期间 dsh-vision 被禁用，改动 1 的图片放行声明失去改写兜底 → image 块落盘历史 → serializer 每轮 `UNSUPPORTED_CONTENT` → 会话锁死。
+>
+> **最终结论（2026-08-16）：这 4 处改动不再重新应用。**
+> 聊天气泡方案已切换为 **vision-router 式**（图片块原样保留在会话日志 → GUI 天然显示原图；识别文本只在模型输入层改写），零本体改动。
+> 改动 3（MessageItem）的 `dshVision`/`dshAttachment` 机制废弃；改动 2 的 `dsh-vision` 命名空间无宿主（插件已并入 router）。
+> 本插件能力（本地 Ollama 后端 / 即时翻译 / 结构化识别 / 桌面截屏）已并入 dsh-vision-router 魔改版（见 `eval/`），后续维护随 router 走。
+
 ---
 
 ## 改动总览
