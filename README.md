@@ -1,5 +1,18 @@
 # dsh-vision：DeepSeek Harness 外接视觉插件
 
+> ## ⛔ 维护状态：基本放弃维护（2026-08-16 起）
+>
+> **本项目已进入归档状态，不再主动更新。** 架构与思路已全部并入
+> [dsh-vision-router](https://github.com/ysr666/dsh-vision-router)
+> （本地 Ollama / LM Studio 双后端、即时翻译 instantDescribe、结构化识别、桌面截屏、
+> imageMemory 记忆、Anthropic 格式兼容、逐级降级链），后续维护随 router 走。
+>
+> - 本仓库仅保留作为历史参考与二次开发起点（MIT），Bug 与新功能不再跟进
+> - 新用户请直接使用 **dsh-vision-router**（含本插件全部能力 + 更多）
+> - 本插件与 router 的合并记录见 [docs/upstream-changes.md](docs/upstream-changes.md)
+
+---
+
 > 让 dsh 默认的纯文本 DeepSeek 模型也能"看见"图片——图片进、文字描述出。
 > 本地 Ollama 零费用，或可选云端大模型（通义/Gemini/GLM）提升精度上限。
 > 识别引擎自包含（visual-ds v2 基线封存迁移），不依赖外部目录。
