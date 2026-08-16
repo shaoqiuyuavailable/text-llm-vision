@@ -7,6 +7,9 @@
 > （本地 Ollama / LM Studio 双后端、即时翻译 instantDescribe、结构化识别、桌面截屏、
 > imageMemory 记忆、Anthropic 格式兼容、逐级降级链），后续维护随 router 走。
 >
+> - **定位**：本分支是 [text-llm-vision 主分支](https://github.com/shaoqiuyuavailable/text-llm-vision/tree/main)
+>   架构与工程策略的 **dsh 单独适配版**（外接视觉引擎 + 薄插件机制 + Scan/Zoom/Guess 场景路由一脉相承），
+>   仅针对 DeepSeek Harness 环境做了插件化适配；通用架构演进请参考主分支
 > - 本仓库仅保留作为历史参考与二次开发起点（MIT），Bug 与新功能不再跟进
 > - 新用户请直接使用 **dsh-vision-router**（含本插件全部能力 + 更多）
 > - 本插件与 router 的合并记录见 [docs/upstream-changes.md](docs/upstream-changes.md)
