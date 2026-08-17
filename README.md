@@ -1,210 +1,134 @@
-# dsh-vision：DeepSeek Harness 外接视觉插件
+# dsh-vision：DeepSeek Harness 场景级识图路由层
 
-> ## ⛔ 维护状态：基本放弃维护（2026-08-16 起）
+> ## 🔄 项目重启（2026-08 起）：从"外接视觉插件"重构为"识图路由层"
 >
-> **本项目已进入归档状态，不再主动更新。** 架构与思路已全部并入
-> [dsh-vision-router](https://github.com/ysr666/dsh-vision-router)
-> （本地 Ollama / LM Studio 双后端、即时翻译 instantDescribe、结构化识别、桌面截屏、
-> imageMemory 记忆、Anthropic 格式兼容、逐级降级链），后续维护随 router 走。
+> **新定位**：依赖 **dsh 生态**重构——不再自带工具、不再自带识别引擎实现，
+> 只做**模型的识图路由决策**（场景判定 + 引擎选择），工具调用由其他插件实现。
 >
-> - **定位**：本分支是 [text-llm-vision 主分支](https://github.com/shaoqiuyuavailable/text-llm-vision/tree/main)
->   架构与工程策略的 **dsh 单独适配版**（外接视觉引擎 + 薄插件机制 + Scan/Zoom/Guess 场景路由一脉相承），
->   仅针对 DeepSeek Harness 环境做了插件化适配；通用架构演进请参考主分支
-> - 本仓库仅保留作为历史参考与二次开发起点（MIT），Bug 与新功能不再跟进
-> - 新用户请直接使用 **dsh-vision-router**（含本插件全部能力 + 更多）
-> - 本插件与 router 的合并记录见 [docs/upstream-changes.md](docs/upstream-changes.md)
+> - **开关式前置路由**：提供一个总开关，开启时在**其他插件的自身路由层之前**
+>   调用本层的精细化场景路由（Scan→Zoom→Guess 判定 → 按场景选引擎/后端）；
+>   关闭时完全不介入，回到其他插件的默认路由策略
+> - **不影响操作工具**：本层只做"这张图该交给谁识别"的决策，不改写、不接管
+>   其他插件的操作工具（describe / ocr / ground / crop…），识别结果仍由
+>   各插件自己的工具链路消费
+> - **技术栈**：以 dsh 插件机制为底座（cordis + settings + tools 生态），
+>   识别后端走 OpenAI 兼容端点（本地 Ollama / LM Studio / 云端均可）
+>
+> 历史版本（含工具 + 引擎实现）见 git 历史；与 dsh-vision-router 的合并记录
+> 见 [docs/upstream-changes.md](docs/upstream-changes.md)。
 
 ---
 
-> 让 dsh 默认的纯文本 DeepSeek 模型也能"看见"图片——图片进、文字描述出。
-> 本地 Ollama 零费用，或可选云端大模型（通义/Gemini/GLM）提升精度上限。
-> 识别引擎自包含（visual-ds v2 基线封存迁移），不依赖外部目录。
+> 让 dsh 生态里的视觉插件共享一套**精细化识图路由决策**——场景判定在前，
+> 引擎选择在后，识别由各插件自己的工具链路完成。
 
 ## 🎉 开源与二次开发
 
-**热烈欢迎各位个人开发者对本项目进行二次开发与个性化定制！**
+**本项目 MIT 协议开源，重启后是"薄路由"设计：**
 
-- 本插件 MIT 协议开源，代码结构刻意保持"薄插件"设计：dsh 侧只做工具注册/事件改写/配置，重活全在 Python 引擎，**改引擎不碰 dsh，改 dsh 不碰引擎**
-- 三大可定制面：
-  1. **识别引擎**（`python/vision_client.py` + `prompts.py`）：换模型、改提示词、加场景、加引擎（如接入 rapid-table / OmniParser / UI-TARS 只需替换引擎函数体，路由表不用动）
-  2. **工具面**（`src/index.ts`）：加工具、改描述、调参数，全部走 `defineTool` 标准接口
-  3. **GUI 配置**（settings 命名空间）：新配置项 = schema 加字段 + 卡片加控件，模式现成
-- 开发自检：`python scripts/test_all.py`（82 用例回归）+ `python scripts/verify_mount.py`（挂载检查）
+- **只做路由决策**：图片进来 → 场景判定（Scan→Zoom→Guess）→ 按场景选引擎/后端（OpenAI 兼容端点）
+- **开关前置**：总开关开启时，在**其他插件的自身路由层之前**介入；关闭时完全透明，不改变其他插件行为
+- **不碰工具**：describe / ocr / ground / crop 等操作工具归其他插件所有，本层不做工具、不改写、不接管
+- **可定制面**：
+  1. **场景判定提示词**（`prompts.py`）：改判定粒度、加新场景
+  2. **路由表**（`vision_client.py` 的 `_route_engine`）：场景 → 引擎/后端的映射，可加可改
+  3. **开关与后端配置**（settings 命名空间）：开关、本地/云端端点、模型，GUI 可改
 - 想分享你的定制版？Fork 本仓库 → 改 → PR，或发布你自己的 npm 包均可
-- 反馈/建议/问题：GitHub Issues（见仓库首页）——**本人心情好才看一眼修一下，心情不好请自行拉取二次开发，反正 MIT 都随你折腾**
 
 ---
 
 ## ⚠️ 注意事项（必读）
 
-### 本体改动：已废弃，零改动（2026-08-16 起）
+### 与 dsh-vision-router 的关系
 
-**本插件不再需要修改 dsh 本体源码**——聊天气泡方案已切换为 **vision-router 式**（图片原样保留在会话日志 → GUI 天然显示原图；识别文本只在模型输入层改写），原先的 4 处本体改动（网关放行 / 设置白名单 / MessageItem / 配置卡片）**已全部回退，不再重新应用**。
+**互补，不重复**：dsh-vision-router 负责**后端级路由**（本地 → 云 → 免费兜底的降级链 + 操作工具）；
+本项目负责**场景级路由**（这张图是聊天记录 / UI / 表格 / 代码 → 该交给哪类引擎）。二者可叠加：
+本项目开关开启时，在 router 的自身路由之前做场景决策，识别仍由 router 的工具链路消费。
 
-> 历史记录见 [`docs/upstream-changes.md`](docs/upstream-changes.md)（归档性质，仅作回溯）。
-> 本插件的识别引擎与配置已并入 [dsh-vision-router](https://github.com/ysr666/dsh-vision-router)（本地 Ollama 后端 / 即时翻译 / 结构化识别 / 桌面截屏），后续维护随 router 走。
+> 历史：2026-08 曾把旧版（工具 + 引擎实现）并入 router（见
+> [docs/upstream-changes.md](docs/upstream-changes.md)）；重启后本项目聚焦场景路由层。
 
-### 环境依赖
+### 环境依赖（重启版）
 
 | 依赖 | 必需？ | 说明 |
 |------|--------|------|
-| Python 3.9+ | ✅ 必需 | 识别引擎运行环境 |
-| pip 包（httpx / Pillow） | ✅ 必需 | `python scripts/install.py --deps` |
-| Ollama + 视觉模型（qwen2.5vl） | 本地必需 | 云端配置后可省；`ollama pull qwen2.5vl` |
-| 云端 API key | 可选 | 走 `<NAME>_API_KEY` 环境变量或 config，提升精度上限 |
-| dsh 本体改动 | ❌ 不需要 | 已废弃（见上） |
+| dsh 生态 | ✅ 必需 | 插件挂载 + settings + 前置钩子（cordis 机制） |
+| 场景判定（可选 Python） | 视实现 | 若判定用本地 Python 跑，需 Python 3.9+ + httpx |
+| OpenAI 兼容后端 | 至少 1 个 | 本地 Ollama / LM Studio / 云端任选，供路由结果消费 |
+| 操作工具插件 | ✅ 必需 | 如 dsh-vision-router——识别执行方，本层只做决策 |
 
-> **自包含**：识别引擎（vision_client/config_loader/prompts）随插件 `python/` 部署，**不依赖**外部 visual-ds 目录或 `~/.claude/vision-eyes`。
-
----
-
-## ✨ 核心卖点
-
-### 1. 对 DeepSeek 官方模型"外挂"视觉处理机制
-
-DeepSeek 官方模型是纯文本，官方视觉方案（`read_image`）需要换支持 image 的模型。本插件**不改模型、不改 API**——通过 `agent/pre-step` 钩子在消息进入模型前拦截图片：
-
-```
-粘贴/上传图片 → 插件钩子拦截 → 本地/云端识别 → 替换为文本块
-  → DeepSeek 模型只收到文字（图片字节永不进 API）
-```
-
-- **模型无关**：任何文本模型原地获得视觉能力
-- **零 API 费用**（本地）/ 可选云端
-- **图片不出机器**（本地默认）
-- 识别失败自动降级占位，**永不把图片发给纯文本 API**
-
-### 2. 聊天气泡支持图片
-
-**方案已切换为 vision-router 式（2026-08-16 起），不再改动 dsh 本体源码。**
-
-- **图片原样显示**：图片块原样保留在会话日志，GUI 天然渲染原图（无需本体改动，无 `dshAttachment`/`MessageItem` 魔法）
-- **识别文本只在模型输入层**：wrapper 适配器把图片块替换为本地识别文本（含耗时标注），模型照常"看见"，会话日志干净、不占上下文
-- **历史回溯**：翻旧会话仍看到原图（附件按 sha256 内容寻址存储），同图跨轮命中 imageMemory 缓存、不重复识别
-- 旧方案（`dshVision` 标记 + `dshAttachment` 缩略图提升，本体改动 3）**已废弃**——见 [docs/upstream-changes.md](docs/upstream-changes.md)
-- 本插件的识别引擎与配置已**并入 dsh-vision-router**（本地 Ollama 后端 + 即时翻译 + 结构化风格 + 桌面截屏），后续维护随 router 走
-
-### 3. 精细化路由与针对性识别
-
-**5 引擎场景路由**（识别前决策，非通用 VLM 直出）：
-
-| 场景 | 引擎 | 针对性 |
-|------|------|--------|
-| 聊天记录 `document.chat` | ocr | RapidOCR 本地提取，纯文字零幻觉 |
-| 代码 `document.code` | code | 逐字转写引擎（保真度高于通用 OCR） |
-| 表格 `document.table` | table | Markdown 表格提取 |
-| UI 截图 `screenshot.software_ui` | gui | 界面元素结构化枚举 |
-| 图表/其他 `_default` | vlm | Scan→Zoom→Guess 三阶段视觉理解 |
-
-- **混合场景识别**：一张图多人+飞机 → 多分支各自路由、各提各的
-- **模型级覆盖**：路由值可写 `引擎:模型`（如 `vlm:qwen-vl-max`），按场景指定本地/云端模型
-- 路由表 GUI 可改（JSON 字段），零代码定制
-
-### 4. 其他细节
-
-- **无缝粘贴**：零操作，粘贴即识别（对比：部分插件需切模型组/落盘中转）
-- **GUI 全控**：设置 → 插件 → dsh-vision 卡片 12 项配置，保存即生效（无需重启）
-- **云端灵活**：通义/Gemini/GLM/自定义，无 key 自动回退本地
-- **防御性**：120s 看门狗 kill、引擎异常回退 vlm、OCR 失败升级视觉模型、输出清洗防 JSON 崩溃、并发信号量防单卡雪崩
-- **同图去重**：进程内 LRU（sha256），重复查看零识别、零计费
-- **一键安装**：`scripts/install.py` 7 个可选项（check/deps/local/cloud/deploy/mount/test）
-- **82 用例回归**：CLI 16 + 引擎 39 + 配置 27，mock 引擎不依赖网络
+> **自包含**：本层只产出"场景 + 引擎建议"决策，不依赖具体识别引擎实现。
 
 ---
 
-## ⚖️ 优劣对比
+## ✨ 核心价值：场景级识图路由
 
-### vs 官方视觉方案（`read_image` + 支持 image 的模型）
+**"这张图该交给谁识别"的决策层**——在识别发生之前，先判定图片属于什么场景，
+再按场景选择最合适的引擎/后端，而不是所有图都塞给同一个通用 VLM：
 
-| 维度 | 官方 | dsh-vision |
-|------|------|-----------|
-| 机制 | 图片字节原生进模型上下文 | 图片 → 识别 → 文本进上下文 |
-| 信息保真 | 无损（模型看像素） | 有损（识别转述），云端大模型可缩小差距 |
-| 模型要求 | 必须视觉模型（付费） | **任何文本模型**（DeepSeek 原生可用） |
-| 成本 | 视觉 API 计费 | 本地零 / 云端可选 |
-| 隐私 | 图片必然出网 | 本地零出网 |
-| 工具面 | 1 个（read_image） | 6 个（描述/OCR/定位/对比/截图/规则） |
-| 场景特化 | 无 | 5 引擎路由 + 混合场景 |
-| 粘贴体验 | 需模型支持，DeepSeek 下直接失败 | 无缝拦截；气泡显原图（router 式，零本体改动） |
+| 场景 | 推荐引擎/后端 | 为什么 |
+|------|--------------|--------|
+| 聊天记录 `document.chat` | OCR（如 RapidOCR） | 纯文字，零幻觉、零 OCR 噪声 |
+| 代码 `document.code` | 逐字转写 | 保真度高于通用 OCR |
+| 表格 `document.table` | 表格提取 | Markdown 结构化 |
+| UI 截图 `screenshot.software_ui` | GUI 引擎 | 界面元素结构化枚举 |
+| 图表/其他 `_default` | 通用 VLM | Scan→Zoom→Guess 三阶段理解 |
 
-**结论**：官方赢在"信息无损"（架构性差距，补不齐）；dsh-vision 赢在模型无关/成本/隐私/场景深度/体验。**配好云端 API 后，90%+ 场景识别质量已接近官方**。
+- **混合场景识别**：一张图含多人+飞机 → 多分支各自路由、各提各的
+- **模型级覆盖**：路由值可写 `引擎:模型`，按场景指定本地/云端
+- **开关前置**：总开关开启才介入，关闭时完全透明，不影响其他插件
+- **不碰工具**：决策结果交给其他插件的工具链路消费，本层零工具、零改写
 
-### vs 第三方第一梯队（dsh-vision-router，社区评分最高；对比截至 2026-08-15）
-
-| 维度 | router | dsh-vision |
-|------|--------|-----------|
-| 工具面 | **13 个像素工具**（crop/pixel_diff/trace/...） | 5 个理解工具 |
-| 后端 | 免 key OVH 匿名回退（限速）+ 用户模型 | 本地 Ollama + 任意云端 |
-| 路由 | 工具级编排（vision chain 多步循环） | **引擎级场景路由**（识别前决策） |
-| 粘贴 | 需切 "+ Auto Vision" 模型组 | **无缝拦截，零操作** |
-| 聊天气泡 | 图片原样显示（输入层改写，零本体改动） | 同 router 方案（已并入） |
-| GUI | 设置卡片（模型组编排） | 卡片 12 项（引擎参数全控） |
-| 依赖 | 无 Python（sharp/potrace/tesseract/Chrome） | Python + Ollama（自包含） |
-| 测试 | 149 用例 + doctor CLI | 82 用例 + 文档链 |
-| 隐私 | 默认走匿名云端 | 本地零出网 |
-
-**结论**：router 赢在"像素工具广度 + 零依赖 + 免 key 开箱"；dsh-vision 赢在"场景路由深度 + 无缝体验 + 图文保留 + 隐私 + GUI 全控"。**定位差异化**：router 是"图像处理工具箱"，dsh-vision 是"最懂对话场景的视觉助手"。
+> 旧版（2026-08 前）的"工具面 + 引擎实现"详情见 git 历史；重启后只保留本路由决策层。
 
 ---
 
-## 📁 文件
+## ⚖️ 与 dsh-vision-router 的分工
+
+| 维度 | dsh-vision-router（1.4.x） | 本项目（重启版） |
+|------|---------------------------|------------------|
+| 路由层级 | **后端级**：本地 → 云 → 免费兜底降级链 | **场景级**：这张图是什么场景 → 该交给哪类引擎 |
+| 操作工具 | ✅ 14 个像素/理解工具 | ❌ 不提供（归其他插件） |
+| 介入方式 | 接管图片轮的改写/降级 | **开关前置**：开启才介入，关闭完全透明 |
+| 关系 | 识别执行方 | 决策增强方（可选叠加在 router 之前） |
+
+**一句话**：router 是"识别怎么跑"，本项目是"识别该往哪跑"。二者叠加时，
+本项目在 router 的自身路由之前做场景判定，识别仍由 router 的工具链路完成。
+
+---
+
+## 📁 文件（重启版规划）
 
 | 文件 | 作用 |
 |------|------|
-| `cordis.patch.yml` / `cordis.yml` | 插件装载补丁（bundle 标准命名，`name: dsh-vision`） |
-| `src/index.ts` | dsh 原生插件：6 工具 + 粘贴兜底 + GUI 配置同步 |
-| `python/vision_cli.py` | Python CLI：统一调 analyze/ocr/locate/compare |
-| `python/vision_client.py` | 识别引擎（自包含：5 引擎路由/混合场景/缓存） |
-| `python/config_loader.py` | 配置读取（`~/.dsh/vision/config.json`，v2 路由基线） |
-| `python/prompts.py` | v2 提示词体系 + 路由/模型基线表 |
-| `python/config.json` | 引擎默认配置（可被 `~/.dsh/vision/config.json` 覆盖） |
-| `scripts/install.py` | 一键安装（check/deps/local/cloud/deploy/mount/test/all） |
-| `scripts/verify_mount.py` | 静态挂载检查 |
-| `scripts/test_all.py` | 全量回归（89 用例 + Node 冒烟） |
-| `scripts/smoke-apply.mjs` | Node 侧冒烟（6 工具 + 命名空间断言） |
-| `docs/upstream-changes.md` | **本体改动历史归档（已废弃，零本体改动）** |
-| `docs/architecture.md` | 架构设计 |
-| `AGENTS.md` | 会话软规则模板 + GUI 配置指引 |
+| `src/index.ts` | dsh 插件面：开关注册 + 前置路由钩子（极薄） |
+| `python/vision_client.py` | 场景判定 + 引擎路由表（保留核心决策逻辑） |
+| `python/prompts.py` | 场景判定提示词 |
+| `python/config_loader.py` | 配置读取（开关 + 后端端点） |
+| `docs/upstream-changes.md` | 与 router 的合并/协作记录 |
+
+> 旧版文件（vision_cli / scripts / 引擎实现）见 git 历史。
 
 ---
 
-## 🚀 快速开始
+## 🚀 快速开始（规划）
 
 ```bash
-python scripts/install.py --all   # 全流程（依赖→本地→云端(交互)→部署→测试）
-python scripts/install.py --mount # 或单独挂载
-pnpm dsh web                      # 重启生效
+# 1. 挂载插件
+# 2. 设置 → 插件 → dsh-vision：打开「场景路由」开关
+# 3. 配置后端（本地 Ollama / LM Studio / 云端 OpenAI 兼容端点）
+# 4. 重启 dsh 生效——图片轮先走本层场景判定，再交其他插件的工具识别
 ```
 
-- 更细步骤见 [QUICKSTART.md](QUICKSTART.md)
-- 本体改动已废弃（零改动），[docs/upstream-changes.md](docs/upstream-changes.md) 仅作历史归档
-- 版本演进见 [CHANGELOG.md](CHANGELOG.md)
-
-## 🛠️ 自定义
-
-编辑 `python/config.json` 或 GUI 卡片（设置 → 插件 → dsh-vision）：
-
-```json
-{
-  "ollama": {
-    "url": "http://localhost:11434/api/generate",
-    "model": "qwen2.5vl",
-    "temperature": 0.5,
-    "top_p": 0.8,
-    "grounding": true,
-    "precision": "standard"
-  }
-}
-```
-
-- 换模型：改 `model`（如 `llava`、`qwen2.5vl:13b`）
-- 换档位：GUI 卡片 `level`（off/fast/standard/deep）
-- 云端：GUI 卡片"云端厂商列表(JSON)"或 `--cloud` 脚本
+- 开关**关闭** = 完全不介入，其他插件行为零变化
+- 开关**开启** = 在图片轮进入其他插件路由层之前，先做场景精细化决策
 - 场景路由：GUI 卡片"场景路由表(JSON)"或 config `router`
 
-## 📋 已知限制
+## 📋 已知限制（重启版）
 
-- 粘贴兜底只处理用户消息 `content` 中的 image 块；工具返回里的 image 块不转换（文本模型本就不应产生）
-- 识别耗时取决于模型：`fast` 适合高频截图，`deep` 用于空间结构/推测
-- **本体改动已全部回退（2026-08-16）**：聊天气泡走 vision-router 式（图片原样显示），dsh 源码零改动；`upstream-changes.md` 保留完整记录供参考
-- 本插件已并入 [dsh-vision-router](https://github.com/ysr666/dsh-vision-router)（本地 Ollama 后端 + 即时翻译 + 结构化风格 + 桌面截屏），后续以 router 魔改版为准
+- 场景判定有成本：开启前置路由后，图片轮在进入其他插件路由层之前多一次
+  场景判定调用（可选本地 Python 或轻量模型，避免明显延迟）
+- 路由决策质量依赖场景判定提示词：新场景类型需在路由表补充映射
+- 本层不做工具：若其他插件未提供对应工具，场景决策结果无处消费（需配
+  dsh-vision-router 或其他视觉工具插件）
+- 与 dsh-vision-router 的合并/协作历史见 [docs/upstream-changes.md](docs/upstream-changes.md)
