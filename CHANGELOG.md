@@ -2,6 +2,21 @@
 
 插件版本演进记录。视觉引擎版本跟随 visual-ds 基线（封存于 commit `0a34ad6`）。
 
+## [归档] - 2026-08-18
+
+### 历史使命完成：场景级识图路由已全部并入 dsh-vision-router
+
+- **概念落地轨迹**：#136（1+x 结构化 bootstrap，本项目 scan→zoom/guess 的复用起点）
+  → #142（v2 能力路由，群主在 PR 描述与 docs 注明概念来源含本项目早期工作）
+  → #177（freeCloudFirst + OCR 提示词强化，本仓库作者）
+  → #178（mixed 分路 / visionDepth 档位 / content_kind+mixed_of schema 收敛 /
+  guidanceOverrides，本仓库作者——直接移植本项目的场景路由、PRECISION 档位、
+  混合双分支、结构化判定设计）
+- **关系定稿**：本项目 = 概念起源与原型（2026-08-14/15 代码）；dsh-vision-router =
+  工程化承接方（独立 PR 演进，判定接口稳定后由 #142 能力路由消费）
+- **归档动作**：README 更新为归档版（含关系说明与 PR 索引）；仓库转只读，
+  代码保留供追溯；新功能与维护移步 dsh-vision-router
+
 ## [0.1.0] - 2026-08-16（当前）
 
 ### 打磨（日志/健壮性/UI）

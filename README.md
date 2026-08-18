@@ -1,134 +1,96 @@
-# dsh-vision：DeepSeek Harness 场景级识图路由层
+# dsh-vision：DeepSeek Harness 场景级识图路由层（已归档）
 
-> ## 🔄 项目重启（2026-08 起）：从"外接视觉插件"重构为"识图路由层"
+> ## 🏁 项目归档（2026-08-18）：历史使命已完成
 >
-> **新定位**：依赖 **dsh 生态**重构——不再自带工具、不再自带识别引擎实现，
-> 只做**模型的识图路由决策**（场景判定 + 引擎选择），工具调用由其他插件实现。
+> 本项目的设计目标——**"场景级识图路由"**——已经全部以工程化形态并入
+> **dsh-vision-router**（[ysr666/dsh-vision-router](https://github.com/ysr666/dsh-vision-router)）生态，
+> 本项目转为只读归档，代码保留供追溯，新功能与维护请移步 dsh-vision-router。
 >
-> - **开关式前置路由**：提供一个总开关，开启时在**其他插件的自身路由层之前**
->   调用本层的精细化场景路由（Scan→Zoom→Guess 判定 → 按场景选引擎/后端）；
->   关闭时完全不介入，回到其他插件的默认路由策略
-> - **不影响操作工具**：本层只做"这张图该交给谁识别"的决策，不改写、不接管
->   其他插件的操作工具（describe / ocr / ground / crop…），识别结果仍由
->   各插件自己的工具链路消费
-> - **技术栈**：以 dsh 插件机制为底座（cordis + settings + tools 生态），
->   识别后端走 OpenAI 兼容端点（本地 Ollama / LM Studio / 云端均可）
->
-> 历史版本（含工具 + 引擎实现）见 git 历史；与 dsh-vision-router 的合并记录
-> 见 [docs/upstream-changes.md](docs/upstream-changes.md)。
+> **概念落地轨迹**：
+> - **#136** 1+x 结构化 bootstrap（第一遍整体预判 + 后续按需深挖的复用起点）
+> - **#142** v2 能力路由（群主工程化；PR 描述与 docs 已注明概念来源含本项目早期工作）
+> - **#177** freeCloudFirst + OCR 提示词强化（本仓库作者）
+> - **#178** mixed 分路 / visionDepth 档位 / content_kind+mixed_of schema 收敛 / guidanceOverrides（本仓库作者）
 
 ---
 
-> 让 dsh 生态里的视觉插件共享一套**精细化识图路由决策**——场景判定在前，
-> 引擎选择在后，识别由各插件自己的工具链路完成。
+## 与 dsh-vision-router 的关系（归档定稿）
 
-## 🎉 开源与二次开发
+**一句话：本项目是"场景级识图路由"的*概念起源与原型*，dsh-vision-router 是*工程化承接方*。**
 
-**本项目 MIT 协议开源，重启后是"薄路由"设计：**
+| 维度 | dsh-vision（本项目，已归档） | dsh-vision-router（承接方） |
+|------|------------------------------|-----------------------------|
+| 角色 | **概念与原型来源**（2026-08-14/15 已有代码） | **工程化落地**（框架、工具链、维护） |
+| 场景判定 | `scan → zoom → guess`：第一遍整体预判 + 后续按需深挖 | #136 结构化 bootstrap / #178 1+x 深挖引导 |
+| 引擎选择 | `_route_engine` 场景→引擎路由表 | #142 能力路由 / #178 mixed 分支引导 |
+| 精度控制 | PRECISION 档位（fast/standard/deep） | #178 visionDepth 档位（同名移植） |
+| 混合图 | 候选列表 + 聚焦点 + 双分支 | #178 mixed 分路（≤2 分支封顶） |
+| 结构化判定 | 视觉模型直接输出枚举（免启发式） | #178 content_kind / mixed_of schema 收敛 |
+| 协作方式 | 设计/概念输入方 | 独立 PR 承接，接口稳定后由 #142 消费 |
 
-- **只做路由决策**：图片进来 → 场景判定（Scan→Zoom→Guess）→ 按场景选引擎/后端（OpenAI 兼容端点）
-- **开关前置**：总开关开启时，在**其他插件的自身路由层之前**介入；关闭时完全透明，不改变其他插件行为
-- **不碰工具**：describe / ocr / ground / crop 等操作工具归其他插件所有，本层不做工具、不改写、不接管
-- **可定制面**：
-  1. **场景判定提示词**（`prompts.py`）：改判定粒度、加新场景
-  2. **路由表**（`vision_client.py` 的 `_route_engine`）：场景 → 引擎/后端的映射，可加可改
-  3. **开关与后端配置**（settings 命名空间）：开关、本地/云端端点、模型，GUI 可改
-- 想分享你的定制版？Fork 本仓库 → 改 → PR，或发布你自己的 npm 包均可
+**时间线与归属**：
+- 2026-08-14/15：本项目代码（scan→zoom/guess、场景路由表、PRECISION、混合路由）已存在
+- 2026-08-16 07:55：群聊推广"场景判定驱动识别路由"思路
+- 2026-08-17：#136（05:13）、#142（08:05）——router 生态开始承接
+- 2026-08-18：#142 群主在 PR 描述与 `docs/v2-capability-routing.md` 注明概念来源（scene-aware routing 方向受本项目早期工作启发）；#177/#178 由本仓库作者提交，把剩余设计（免费优先、OCR 策略、mixed 分路、深度档位、schema 收敛、引导可配置）全部落地
 
----
-
-## ⚠️ 注意事项（必读）
-
-### 与 dsh-vision-router 的关系
-
-**互补，不重复**：dsh-vision-router 负责**后端级路由**（本地 → 云 → 免费兜底的降级链 + 操作工具）；
-本项目负责**场景级路由**（这张图是聊天记录 / UI / 表格 / 代码 → 该交给哪类引擎）。二者可叠加：
-本项目开关开启时，在 router 的自身路由之前做场景决策，识别仍由 router 的工具链路消费。
-
-> 历史：2026-08 曾把旧版（工具 + 引擎实现）并入 router（见
-> [docs/upstream-changes.md](docs/upstream-changes.md)）；重启后本项目聚焦场景路由层。
-
-### 环境依赖（重启版）
-
-| 依赖 | 必需？ | 说明 |
-|------|--------|------|
-| dsh 生态 | ✅ 必需 | 插件挂载 + settings + 前置钩子（cordis 机制） |
-| 场景判定（可选 Python） | 视实现 | 若判定用本地 Python 跑，需 Python 3.9+ + httpx |
-| OpenAI 兼容后端 | 至少 1 个 | 本地 Ollama / LM Studio / 云端任选，供路由结果消费 |
-| 操作工具插件 | ✅ 必需 | 如 dsh-vision-router——识别执行方，本层只做决策 |
-
-> **自包含**：本层只产出"场景 + 引擎建议"决策，不依赖具体识别引擎实现。
+**协作结论**（群主 #142 评论区确认）：独立 PR 演进，`content_kind`/`mixed_of` 等判定接口稳定后由 #142 能力路由消费；本项目的判定结果可直接喂给 #142，衔接成本低。
 
 ---
 
-## ✨ 核心价值：场景级识图路由
+## 项目沿革（背景）
 
-**"这张图该交给谁识别"的决策层**——在识别发生之前，先判定图片属于什么场景，
-再按场景选择最合适的引擎/后端，而不是所有图都塞给同一个通用 VLM：
+### 第一阶段（2026-08-15 前）：外接视觉插件
+自带工具 + 识别引擎实现（describe_image / extract_text / locate_object / compare_images 等），
+引擎随 visual-ds 基线封存（commit `0a34ad6`）。GUI 配置卡片、同图去重缓存、云端通道等
+均在此阶段完成，详见 [CHANGELOG.md](CHANGELOG.md) 与 git 历史。
 
-| 场景 | 推荐引擎/后端 | 为什么 |
-|------|--------------|--------|
-| 聊天记录 `document.chat` | OCR（如 RapidOCR） | 纯文字，零幻觉、零 OCR 噪声 |
-| 代码 `document.code` | 逐字转写 | 保真度高于通用 OCR |
-| 表格 `document.table` | 表格提取 | Markdown 结构化 |
-| UI 截图 `screenshot.software_ui` | GUI 引擎 | 界面元素结构化枚举 |
-| 图表/其他 `_default` | 通用 VLM | Scan→Zoom→Guess 三阶段理解 |
+### 第二阶段（2026-08-16 起）：重启为"场景级识图路由层"
+不再自带工具、不再自带识别引擎，只做**模型的识图路由决策**（场景判定 + 引擎选择），
+工具调用由其他插件实现。设计要点：
+- **开关式前置路由**：总开关开启时在其他插件路由层之前介入；关闭时完全不介入
+- **不影响操作工具**：只做"这张图该交给谁识别"的决策，不改写、不接管识别工具
+- **技术栈**：dsh 插件机制（cordis + settings + tools 生态），识别后端走 OpenAI 兼容端点
 
-- **混合场景识别**：一张图含多人+飞机 → 多分支各自路由、各提各的
-- **模型级覆盖**：路由值可写 `引擎:模型`，按场景指定本地/云端
-- **开关前置**：总开关开启才介入，关闭时完全透明，不影响其他插件
-- **不碰工具**：决策结果交给其他插件的工具链路消费，本层零工具、零改写
-
-> 旧版（2026-08 前）的"工具面 + 引擎实现"详情见 git 历史；重启后只保留本路由决策层。
+### 第三阶段（2026-08-18）：使命完成，归档
+第二阶段的设计已全部并入 dsh-vision-router（见上文关系表），本仓库归档只读。
 
 ---
 
-## ⚖️ 与 dsh-vision-router 的分工
+## ⚠️ 注意事项（归档后）
 
-| 维度 | dsh-vision-router（1.4.x） | 本项目（重启版） |
-|------|---------------------------|------------------|
-| 路由层级 | **后端级**：本地 → 云 → 免费兜底降级链 | **场景级**：这张图是什么场景 → 该交给哪类引擎 |
-| 操作工具 | ✅ 14 个像素/理解工具 | ❌ 不提供（归其他插件） |
-| 介入方式 | 接管图片轮的改写/降级 | **开关前置**：开启才介入，关闭完全透明 |
-| 关系 | 识别执行方 | 决策增强方（可选叠加在 router 之前） |
-
-**一句话**：router 是"识别怎么跑"，本项目是"识别该往哪跑"。二者叠加时，
-本项目在 router 的自身路由之前做场景判定，识别仍由 router 的工具链路完成。
+- **仓库只读**：代码保留供追溯，不再接受新功能 PR；问题与需求请到
+  [dsh-vision-router](https://github.com/ysr666/dsh-vision-router) 提
+- **dsh 本体改动**：本项目曾修改 dsh 源码的四处改动已全部回退并废弃，见
+  [docs/upstream-changes.md](docs/upstream-changes.md)
+- **本地遗留**：`~/.dsh/profiles/*/node_modules/dsh-vision` 若仍存在为历史安装，
+  可删除；当前 dsh 生态的视觉功能由 dsh-vision-router 提供
 
 ---
 
-## 📁 文件（重启版规划）
+## 📁 文件（归档版）
 
 | 文件 | 作用 |
 |------|------|
-| `src/index.ts` | dsh 插件面：开关注册 + 前置路由钩子（极薄） |
-| `python/vision_client.py` | 场景判定 + 引擎路由表（保留核心决策逻辑） |
+| `src/index.ts` | 插件面：开关注册 + 前置路由钩子 |
+| `python/vision_client.py` | 场景判定 + 引擎路由表（`_route_engine`，概念被 #178 移植） |
 | `python/prompts.py` | 场景判定提示词 |
 | `python/config_loader.py` | 配置读取（开关 + 后端端点） |
-| `docs/upstream-changes.md` | 与 router 的合并/协作记录 |
-
-> 旧版文件（vision_cli / scripts / 引擎实现）见 git 历史。
+| `scripts/` | 安装 / 冒烟 / 回归测试 |
+| `docs/upstream-changes.md` | dsh 本体改动记录（已废弃） |
+| `docs/图像处理架构对照-迁移基线.md` | 与 router 的架构对照迁移基线 |
 
 ---
 
-## 🚀 快速开始（规划）
+## 📜 相关 PR 索引
 
-```bash
-# 1. 挂载插件
-# 2. 设置 → 插件 → dsh-vision：打开「场景路由」开关
-# 3. 配置后端（本地 Ollama / LM Studio / 云端 OpenAI 兼容端点）
-# 4. 重启 dsh 生效——图片轮先走本层场景判定，再交其他插件的工具识别
-```
+| PR | 内容 | 作者 |
+|----|------|------|
+| [ysr666/dsh-vision-router#136](https://github.com/ysr666/dsh-vision-router/pull/136) | 1+x 结构化 bootstrap（本项目 scan→zoom/guess 的复用起点） | ysr666 |
+| [ysr666/dsh-vision-router#142](https://github.com/ysr666/dsh-vision-router/pull/142) | v2 能力路由（概念来源含本项目，群主已注明） | ysr666 |
+| [ysr666/dsh-vision-router#177](https://github.com/ysr666/dsh-vision-router/pull/177) | freeCloudFirst + OCR 提示词强化 | shaoqiuyuavailable |
+| [ysr666/dsh-vision-router#178](https://github.com/ysr666/dsh-vision-router/pull/178) | mixed 分路 / visionDepth / schema 收敛 / guidanceOverrides | shaoqiuyuavailable |
 
-- 开关**关闭** = 完全不介入，其他插件行为零变化
-- 开关**开启** = 在图片轮进入其他插件路由层之前，先做场景精细化决策
-- 场景路由：GUI 卡片"场景路由表(JSON)"或 config `router`
+---
 
-## 📋 已知限制（重启版）
-
-- 场景判定有成本：开启前置路由后，图片轮在进入其他插件路由层之前多一次
-  场景判定调用（可选本地 Python 或轻量模型，避免明显延迟）
-- 路由决策质量依赖场景判定提示词：新场景类型需在路由表补充映射
-- 本层不做工具：若其他插件未提供对应工具，场景决策结果无处消费（需配
-  dsh-vision-router 或其他视觉工具插件）
-- 与 dsh-vision-router 的合并/协作历史见 [docs/upstream-changes.md](docs/upstream-changes.md)
+*归档时间：2026-08-18。感谢所有使用与关注过本项目的朋友。*
