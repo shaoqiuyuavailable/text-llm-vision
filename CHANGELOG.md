@@ -8,11 +8,11 @@
 
 - **概念落地轨迹**：
   - 设计思想继承（概念启发，工程独立实现）：#136（1+x 结构化 bootstrap，与
-    本项目 scan→zoom/guess 骨架同源）→ #142（v2 能力路由，群主在 PR 描述与
+    本项目 scan→zoom/guess 骨架同源）→ #142（v2 能力路由，维护者在 PR 描述与
     docs 注明概念来源含本项目早期工作）
   - 功能移植（直接落地）：#98 → #141（local Ollama/LM Studio 双后端、
-    instantDescribe、vision_screenshot——作者提交 #98 经群主两轮严格增量审查，
-    群主整合经 #141 合入 main，#98 superseded 关闭）→ #177（freeCloudFirst +
+    instantDescribe、vision_screenshot——作者提交 #98 经维护者两轮严格增量审查，
+    维护者整合经 #141 合入 main，#98 superseded 关闭）→ #177（freeCloudFirst +
     OCR 提示词强化，本仓库作者）→ #178（mixed 分路 / visionDepth 档位 /
     content_kind+mixed_of schema 收敛 / guidanceOverrides，本仓库作者——直接
     移植本项目的场景路由、PRECISION 档位、混合双分支、结构化判定设计，附迁移

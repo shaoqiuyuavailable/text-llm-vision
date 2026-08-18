@@ -8,10 +8,10 @@
 >
 > **概念落地轨迹**：
 > - **#98 → #141** 本地视觉功能并入（local Ollama/LM Studio 双后端、instantDescribe、
->   vision_screenshot 截图——作者提交 #98，经群主两轮"严格增量"审查后由群主整合
+>   vision_screenshot 截图——作者提交 #98，经维护者两轮"严格增量"审查后由维护者整合
 >   经 #141 合入 main，#98 作 superseded 关闭）
 > - **#136** 1+x 结构化 bootstrap（第一遍整体预判 + 后续按需深挖的复用起点）
-> - **#142** v2 能力路由（群主工程化；PR 描述与 docs 已注明概念来源含本项目早期工作）
+> - **#142** v2 能力路由（维护者工程化；PR 描述与 docs 已注明概念来源含本项目早期工作）
 > - **#177** freeCloudFirst + OCR 提示词强化（本仓库作者）
 > - **#178** mixed 分路 / visionDepth 档位 / content_kind+mixed_of schema 收敛 / guidanceOverrides（本仓库作者）
 
@@ -34,19 +34,19 @@
 **归属和分工**（区分*功能移植*与*设计思想继承*）：
 
 - **功能移植**（功能/设计直接落地到 router）：
-  - **#98 → #141（作者提交 → 群主整合合入）**：local Ollama/LM Studio 双后端、
+  - **#98 → #141（作者提交 → 维护者整合合入）**：local Ollama/LM Studio 双后端、
     instantDescribe 即时识别、vision_screenshot 桌面截图——dsh-vision 旧版功能层
-    并入 router 的第一波；作者提交 #98 后经群主两轮严格增量审查（10 + 5 点：
+    并入 router 的第一波；作者提交 #98 后经维护者两轮严格增量审查（10 + 5 点：
     fair-share 只限 local、auto-discovery 恢复、imageMemory 无界撤回、截图
     boot-time 注册、local dispatcher、bbox 坐标系、1+x 不叠 2+x 等），最终由
-    群主以当前 main 为 source of truth 整合、经 **#141** 合入，**#98 作
+    维护者以当前 main 为 source of truth 整合、经 **#141** 合入，**#98 作
     superseded 关闭**（讨论与提交历史保留在 #98）
   - **#177（本仓库作者）**：freeCloudFirst 免费优先 + OCR 提示词强化——成本/速度妥协优化，作者基于 dsh-vision 工程实践的新实现（非旧功能搬移）
   - **#178（本仓库作者）**：mixed 分路、visionDepth 档位、content_kind/mixed_of schema 收敛、guidanceOverrides——**直接移植 dsh-vision 的功能设计**（`_build_branches` 双分支 / PRECISION 档位 / 结构化判定枚举 / 提示词模板化），附迁移说明文档
 - **设计思想继承**（概念启发，工程独立实现）：
-  - **#136（群主）**：1+x 结构化 bootstrap——与本项目 `scan → zoom → guess` 骨架**同源**（第一遍整体预判 + 后续按需深挖），群主独立工程化
-  - **#142（群主）**：v2 能力路由——群主在 PR 描述与 `docs/v2-capability-routing.md` 注明"scene-aware routing 方向受你之前讨论和 dsh-vision 早期工作的启发"，工程实现独立
-- **协作分工**（群主 #142 评论区确认）：独立 PR 演进，`content_kind`/`mixed_of` 等判定接口稳定后由 #142 能力路由消费；本项目的判定结果可直接喂给 #142，衔接成本低
+  - **#136（维护者）**：1+x 结构化 bootstrap——与本项目 `scan → zoom → guess` 骨架**同源**（第一遍整体预判 + 后续按需深挖），维护者独立工程化
+  - **#142（维护者）**：v2 能力路由——维护者在 PR 描述与 `docs/v2-capability-routing.md` 注明"scene-aware routing 方向受你之前讨论和 dsh-vision 早期工作的启发"，工程实现独立
+- **协作分工**（维护者 #142 评论区确认）：独立 PR 演进，`content_kind`/`mixed_of` 等判定接口稳定后由 #142 能力路由消费；本项目的判定结果可直接喂给 #142，衔接成本低
 
 ---
 
@@ -101,9 +101,9 @@ dsh-vision-router（见上文归属和分工）。
 | PR | 内容 | 作者 |
 |----|------|------|
 | [ysr666/dsh-vision-router#98](https://github.com/ysr666/dsh-vision-router/pull/98) | 并入 dsh-vision 本地视觉功能（local 后端 / instantDescribe / 截图）；superseded，经 #141 合入 | shaoqiuyuavailable |
-| [ysr666/dsh-vision-router#141](https://github.com/ysr666/dsh-vision-router/pull/141) | 群主以 current main 为 source of truth 整合 #98（保留 #136 1+x / #139 Settings UX） | ysr666 |
+| [ysr666/dsh-vision-router#141](https://github.com/ysr666/dsh-vision-router/pull/141) | 维护者以 current main 为 source of truth 整合 #98（保留 #136 1+x / #139 Settings UX） | ysr666 |
 | [ysr666/dsh-vision-router#136](https://github.com/ysr666/dsh-vision-router/pull/136) | 1+x 结构化 bootstrap（本项目 scan→zoom/guess 的复用起点） | ysr666 |
-| [ysr666/dsh-vision-router#142](https://github.com/ysr666/dsh-vision-router/pull/142) | v2 能力路由（概念来源含本项目，群主已注明） | ysr666 |
+| [ysr666/dsh-vision-router#142](https://github.com/ysr666/dsh-vision-router/pull/142) | v2 能力路由（概念来源含本项目，维护者已注明） | ysr666 |
 | [ysr666/dsh-vision-router#177](https://github.com/ysr666/dsh-vision-router/pull/177) | freeCloudFirst + OCR 提示词强化 | shaoqiuyuavailable |
 | [ysr666/dsh-vision-router#178](https://github.com/ysr666/dsh-vision-router/pull/178) | mixed 分路 / visionDepth / schema 收敛 / guidanceOverrides | shaoqiuyuavailable |
 
