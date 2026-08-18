@@ -10,10 +10,13 @@
   - 设计思想继承（概念启发，工程独立实现）：#136（1+x 结构化 bootstrap，与
     本项目 scan→zoom/guess 骨架同源）→ #142（v2 能力路由，群主在 PR 描述与
     docs 注明概念来源含本项目早期工作）
-  - 功能移植（直接落地）：#177（freeCloudFirst + OCR 提示词强化，本仓库作者）
-    → #178（mixed 分路 / visionDepth 档位 / content_kind+mixed_of schema 收敛 /
-    guidanceOverrides，本仓库作者——直接移植本项目的场景路由、PRECISION 档位、
-    混合双分支、结构化判定设计，附迁移说明文档）
+  - 功能移植（直接落地）：#98 → #141（local Ollama/LM Studio 双后端、
+    instantDescribe、vision_screenshot——作者提交 #98 经群主两轮严格增量审查，
+    群主整合经 #141 合入 main，#98 superseded 关闭）→ #177（freeCloudFirst +
+    OCR 提示词强化，本仓库作者）→ #178（mixed 分路 / visionDepth 档位 /
+    content_kind+mixed_of schema 收敛 / guidanceOverrides，本仓库作者——直接
+    移植本项目的场景路由、PRECISION 档位、混合双分支、结构化判定设计，附迁移
+    说明文档）
 - **关系定稿**：本项目 = 概念起源与原型（2026-08-14/15 代码）；dsh-vision-router =
   工程化承接方（独立 PR 演进，判定接口稳定后由 #142 能力路由消费）
 - **归档动作**：README 更新为归档版（含关系说明与 PR 索引）；仓库转只读，
